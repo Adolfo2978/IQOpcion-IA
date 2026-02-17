@@ -171,8 +171,7 @@ class LogHandlerGUI(logging.Handler):
 # Mostrar modo de ejecución
 if HEADLESS_MODE:
     logger.info(
-        f"=== MODO CONSOLA (Headless) === Plataforma: {
-            platform.system()}, Replit: {IS_REPLIT}")
+        f"=== MODO CONSOLA (Headless) === Plataforma: {platform.system()}, Replit: {IS_REPLIT}")
 # Handler personalizado para enviar logs a la GUI
 
 
@@ -555,8 +554,7 @@ class FeatureExtractor:
         # Validación crítica
         if features.shape != (1, 15):
             raise ValueError(
-                f"FeatureExtractor ERROR: shape inválido {
-                    features.shape}")
+                f"FeatureExtractor ERROR: shape inválido {features.shape}")
 
         return features
 
@@ -605,8 +603,7 @@ class AIEngineContinuous:
         self.trade_buffer = deque(maxlen=self.batch_size)
 
         self.logger.info(
-            f"🧠 AIEngineContinuous listo | Batch Learning REAL ({
-                self.batch_size} ops)"
+            f"🧠 AIEngineContinuous listo | Batch Learning REAL ({self.batch_size} ops)"
         )
         self._try_load_persisted_state()
 
@@ -909,8 +906,7 @@ class AIEngineContinuous:
         """
         self._last_direction = direction.upper() if direction else None
         self.logger.debug(
-            f"[IA] Dirección de trade establecida: {
-                self._last_direction}")
+            f"[IA] Dirección de trade establecida: {self._last_direction}")
 
     def learn_from_result(
             self, is_win: bool, direction: str = None, account_type: str = "PRACTICE", trade_id: int = None):
@@ -1052,8 +1048,7 @@ class AIEngineContinuous:
             losses = len(y) - wins
 
             self.logger.info(
-                f"📊 BATCH IA COMPLETADO | Ops={
-                    len(y)} | Wins={wins} | Losses={losses}"
+                f"📊 BATCH IA COMPLETADO | Ops={len(y)} | Wins={wins} | Losses={losses}"
             )
 
             # Limpiar buffer para el próximo ciclo
@@ -2006,11 +2001,12 @@ class MotorTradingIntegrado:
         # -------------------------
         confianza_final = (ia_fuerza * w_ia) + (tecnico_score * w_tec)
 
-        if confianza_final < self.umbral_compra:
+        umbral_combinado_min = max(float(self.umbral_compra), 90.0)
+        if confianza_final < umbral_combinado_min:
             return {
                 "accion": "WAIT",
                 "confianza": round(confianza_final, 2),
-                "motivo": "CONFIANZA_INSUFICIENTE",
+                "motivo": f"CONFIANZA_INSUFICIENTE_<{umbral_combinado_min:.1f}",
                 "ia_confianza": ia_fuerza,
                 "tecnico_confianza": tecnico_score,
                 "ia_score": ia_score,
@@ -2053,6 +2049,23 @@ class MotorTradingIntegrado:
         accion_15m = res_15m.get("accion", "WAIT")
 
         if accion_5m in ("CALL", "PUT") and accion_5m == accion_1m == accion_15m:
+            confianza_5m = float(res_5m.get("confianza", 0) or 0)
+            umbral_confluencia = max(
+                float(getattr(self.config, "UMBRAL_SEÑAL_CONFIRMADA", 92.0) or 92.0),
+                90.0
+            )
+            if confianza_5m < umbral_confluencia:
+                return {
+                    "accion": "WAIT",
+                    "confianza": confianza_5m,
+                    "motivo": f"CONFLUENCIA_OK_PERO_CONFIANZA_< {umbral_confluencia:.1f}",
+                    "tipo_senal": "DEBIL",
+                    "ia_score": res_5m.get("ia_score", 0),
+                    "tecnico_score": res_5m.get("tecnico_score", 0),
+                    "ia_confianza": res_5m.get("ia_confianza", 0),
+                    "tecnico_confianza": res_5m.get("tecnico_confianza", 0),
+                    "patron_wm": res_5m.get("patron_wm")
+                }
             motivo_orig = res_5m.get("motivo", "")
             res_5m["motivo"] = f"{motivo_orig} | CONFLUENCIA_COMPLETA_1M_5M_15M"
             return res_5m
@@ -3311,8 +3324,7 @@ class MarketModeResolver:
         # Actualizar configuración global si cambió el modo
         if self.config.PERFIL_ACTIVO != modo:
             logger.info(
-                f"Cambio de modo detectado: {
-                    self.config.PERFIL_ACTIVO} -> {modo}")
+                f"Cambio de modo detectado: {self.config.PERFIL_ACTIVO} -> {modo}")
             self.config.cambiar_perfil(modo)
         return resultado
 
@@ -3360,8 +3372,7 @@ class MarketModeResolver:
         modo = self.resolver()
         return (f"=== ESTADO DEL MERCADO ===\n"
                 f"Modo: {modo['modo']}\n"
-                f"Forex abierto: {
-                    'Sí' if modo['es_forex_abierto'] else 'No'}\n"
+                f"Forex abierto: {'Sí' if modo['es_forex_abierto'] else 'No'}\n"
                 f"OTC activo: {'Sí' if modo['es_otc_activo'] else 'No'}\n"
                 f"Pares disponibles: {len(modo['pares'])}\n"
                 f"Días históricos: {modo['dias_historicos']}\n"
@@ -3442,8 +3453,7 @@ class GeneradorDatosSinteticos:
             df = pd.DataFrame(datos)
             df.set_index('time', inplace=True)
             logger.info(
-                f"Generados {
-                    len(df)} puntos de datos sintéticos para {simbolo}")
+                f"Generados {len(df)} puntos de datos sintéticos para {simbolo}")
             return df
         except Exception as e:
             logger.error(f"Error generando datos sintéticos: {e}")
@@ -3700,13 +3710,9 @@ class GeneradorDatosSinteticos:
             # Verificar distribucion balanceada
             call_ratio = (df['resultado_binario'] == 1).mean()
             logger.info(
-                f"Generadas {
-                    len(df)} muestras binarias para {simbolo}")
+                f"Generadas {len(df)} muestras binarias para {simbolo}")
             logger.info(
-                f"Distribucion: CALL={
-                    call_ratio:.1%}, PUT={
-                    1 -
-                    call_ratio:.1%}")
+                f"Distribucion: CALL={call_ratio:.1%}, PUT={1 -call_ratio:.1%}")
             return df
         except Exception as e:
             logger.error(f"Error generando datos binarios: {e}")
@@ -3777,8 +3783,7 @@ class GeneradorDatosSinteticos:
                 "EURJPY",
                 "GBPJPY"]
         logger.info(
-            f"Generando dataset de entrenamiento para {
-                len(pares)} pares...")
+            f"Generando dataset de entrenamiento para {len(pares)} pares...")
         todos_datos = []
         for par in pares:
             df_par = self.generar_datos_binarios(
@@ -3795,12 +3800,9 @@ class GeneradorDatosSinteticos:
                 frac=1, random_state=42).reset_index(
                 drop=True)
             logger.info(
-                f"Dataset de entrenamiento generado: {
-                    len(dataset)} muestras totales")
+                f"Dataset de entrenamiento generado: {len(dataset)} muestras totales")
             logger.info(
-                f"Distribucion CALL/PUT: {
-                    dataset['resultado_binario'].mean():.1%} / {
-                    1 - dataset['resultado_binario'].mean():.1%}")
+                f"Distribucion CALL/PUT: {dataset['resultado_binario'].mean():.1%} / {1 - dataset['resultado_binario'].mean():.1%}")
             return dataset
         return pd.DataFrame()
 # ========== REPOSITORIO DE OPERACIONES EXITOSAS ==========
@@ -3945,10 +3947,7 @@ class OperationsRepository:
                 
             self.guardar_trades()
             logger.info(
-                f"Trade {
-                    'EXITOSO ✅' if exitoso else 'FALLIDO ❌'} registrado: {
-                    trade_record['simbolo']} {
-                    trade_record['direccion']}")
+                f"Trade {'EXITOSO ✅' if exitoso else 'FALLIDO ❌'} registrado: {trade_record['simbolo']} {trade_record['direccion']}")
         except Exception as e:
             logger.error(f"Error agregando trade: {e}")
 
@@ -4153,9 +4152,7 @@ class EnsemblePredictor:
             if dir_nn in ('CALL', 'PUT') and dir_indicadores in (
                     'CALL', 'PUT') and dir_nn != dir_indicadores:
                 logger.warning(
-                    f"Conflicto IA vs técnico en {simbolo}: IA={dir_nn} (p={
-                        prob_nn:.3f}) vs TECNICO={dir_indicadores} (p={
-                        prob_indicadores:.3f})"
+                    f"Conflicto IA vs técnico en {simbolo}: IA={dir_nn} (p={prob_nn:.3f}) vs TECNICO={dir_indicadores} (p={prob_indicadores:.3f})"
                 )
                 confianza_conflicto = max(
                     prob_nn, 1 - prob_nn) if dir_nn else 0.5
@@ -4218,9 +4215,7 @@ class EnsemblePredictor:
                 }
             }
             logger.info(
-                f"Prediccion {simbolo}: {direccion} con {
-                    confianza:.1%} confianza {
-                    '(OPERAR)' if operar else '(NO OPERAR)'}")
+                f"Prediccion {simbolo}: {direccion} con {confianza:.1%} confianza {'(OPERAR)' if operar else '(NO OPERAR)'}")
             return resultado
         except Exception as e:
             logger.error(f"Error en prediccion ensemble: {e}")
@@ -4511,9 +4506,7 @@ class EnsemblePredictor:
                 self.umbral_confianza = max(
                     0.80, self.umbral_confianza - 0.005)
             logger.info(
-                f"Precision actual: {
-                    precision_actual:.1%}, Umbral: {
-                    self.umbral_confianza:.1%}")
+                f"Precision actual: {precision_actual:.1%}, Umbral: {self.umbral_confianza:.1%}")
 
     def obtener_precision(self) -> float:
         """Retorna precision actual del predictor"""
@@ -6278,8 +6271,7 @@ class EstrategiaMultiTimeframe:
             resultado['alineacion_tf'] = alineacion_tf
             if not alineacion_tf['alineado']:
                 resultado['razones'].append(
-                    f"Timeframes NO alineados: {
-                        alineacion_tf['razon']}")
+                    f"Timeframes NO alineados: {alineacion_tf['razon']}")
                 return resultado
             resultado['razones'].append("Timeframes alineados")
             # ✅ Predicción IA
@@ -6381,38 +6373,57 @@ class EstrategiaMultiTimeframe:
             # ===== COMPONENTE 2: IA (70%) =====
             peso_ia = self.config.PESO_NEURONAL  # 0.70
             # Calcular confianza total
+            confianza_ia_call = max(0.0, min(100.0, float(prob_call) * 100.0))
+            confianza_ia_put = max(0.0, min(100.0, float(prob_put) * 100.0))
             confianza_total_call = (
-                score_tecnico_call_norm * peso_tecnico) + (confianza_ia * peso_ia)
+                score_tecnico_call_norm * peso_tecnico) + (confianza_ia_call * peso_ia)
             confianza_total_put = (
-                score_tecnico_put_norm * peso_tecnico) + (confianza_ia * peso_ia)
+                score_tecnico_put_norm * peso_tecnico) + (confianza_ia_put * peso_ia)
             # Determinar dirección y confianza
             if confianza_total_call > confianza_total_put:
                 señal = 'CALL'
                 confianza = confianza_total_call
+                confianza_ia = confianza_ia_call
             else:
                 señal = 'PUT'
                 confianza = confianza_total_put
+                confianza_ia = confianza_ia_put
             # ===== FUSIÓN (70% IA + 30% TÉCNICO) =====
             resultado['razones'].append(
                 f"Fusión: {peso_tecnico:.0%} Técnico + {peso_ia:.0%} IA")
             if ia_disponible:
                 resultado['razones'].append(
-                    f"IA: {
-                        'CALL' if prob_call >= 0.5 else 'PUT'} ({
-                        confianza_ia:.1f}%)")
+                    f"IA: {'CALL' if prob_call >= 0.5 else 'PUT'} ({confianza_ia:.1f}%)")
             # ✅ AÑADIR CAMPOS PARA LA TABLA DE ANÁLISIS
             precio_actual = datos_5m['close'].iloc[-1] if not datos_5m.empty else 0.0
             tipo_datos = datos_5m.iloc[-1].get('tipo_datos',
                                                'REAL') if not datos_5m.empty else 'DESCONOCIDO'
             # Calcular confianza técnica normalizada
             tecnico_pct = max(score_tecnico_call_norm, score_tecnico_put_norm)
-            # Determinar fortaleza
-            if confianza >= self.config.UMBRAL_SEÑAL_CONFIRMADA:
+            # Reglas de producción: dirección alineada + confianza combinada mínima 90%
+            umbral_combinado_min = max(
+                float(getattr(self.config, 'UMBRAL_SEÑAL_CONFIRMADA', 92.0) or 92.0),
+                90.0
+            )
+            alineacion_direccion = str(señal).upper() == str(alineacion_tf.get('direccion', '')).upper()
+            if not alineacion_direccion:
+                confianza = 0.0
+                señal = 'ESPERAR'
+                resultado['razones'].append('Dirección final no coincide con tendencia multi-timeframe')
+
+            if confianza >= umbral_combinado_min:
                 fortaleza = 'CONFIRMADA'
             elif confianza >= self.config.UMBRAL_SEÑAL_DESTACADA:
                 fortaleza = 'DESTACADA'
             else:
                 fortaleza = 'DÉBIL'
+            resultado['senal'] = señal
+            resultado['confianza'] = round(float(confianza), 2)
+            resultado['operar'] = bool(
+                señal in ('CALL', 'PUT') and
+                float(confianza) >= umbral_combinado_min and
+                alineacion_direccion
+            )
             resultado['precio_actual'] = round(precio_actual, 5)
             resultado['ia_confianza'] = round(confianza_ia, 2)
             resultado['tecnico_confianza'] = round(tecnico_pct, 2)
@@ -6425,11 +6436,7 @@ class EstrategiaMultiTimeframe:
                 'votos_put': votos_1m_put + votos_5m_put + votos_15m_put
             }
             logger.info(
-                f"✅ Señal OTC turbo: {
-                    resultado['senal']} con confianza {
-                    resultado['confianza']:.2f}% | IA: {
-                    confianza_ia:.1f}% | Técnico: {
-                    tecnico_pct:.1f}%")
+                f"✅ Señal OTC turbo: {resultado['senal']} con confianza {resultado['confianza']:.2f}% | IA: {confianza_ia:.1f}% | Técnico: {tecnico_pct:.1f}%")
             return resultado
         except Exception as e:
             logger.critical(
@@ -7352,8 +7359,7 @@ class SeguimientoSenales:
         }
 
         self.logger.info(
-            f"✅ Sistema de seguimiento inicializado - Modo: {
-                'BINARIO' if modo_binario else 'CONTINUO'}")
+            f"✅ Sistema de seguimiento inicializado - Modo: {'BINARIO' if modo_binario else 'CONTINUO'}")
 
     # ==================================================
     # MÉTODOS DEL MODO CONTINUO
@@ -7551,10 +7557,7 @@ class SeguimientoSenales:
 
                     if coincidencias == 3 and senal.get("confianza", 0) < 95:
                         senal["confianza"] = min(99, senal["confianza"] + 10)
-                        senal["motivo"] = f"{
-                            senal.get(
-                                'motivo',
-                                '')} | CONFLUENCIA_1M_5M_15M"
+                        senal["motivo"] = f"{senal.get('motivo','')} | CONFLUENCIA_1M_5M_15M"
 
             return senal
 
@@ -7598,8 +7601,7 @@ class SeguimientoSenales:
 
                 if resultado:
                     self.logger.info(
-                        f"✅ Operación automática ejecutada: {mejor_par} {
-                            mejor_senal['accion']}")
+                        f"✅ Operación automática ejecutada: {mejor_par} {mejor_senal['accion']}")
                     self.estadisticas["ultima_operacion"] = {
                         "par": mejor_par,
                         "direccion": mejor_senal["accion"],
@@ -7643,8 +7645,7 @@ class SeguimientoSenales:
             }
 
         self.logger.info(
-            f"[SEÑAL {senal_id}] {par} {direccion} EN SEGUIMIENTO ({
-                confianza:.1f}%)")
+            f"[SEÑAL {senal_id}] {par} {direccion} EN SEGUIMIENTO ({confianza:.1f}%)")
 
         # Notificación
         try:
@@ -7952,7 +7953,11 @@ class SeguimientoSenales:
                         self.iq_bridge, '_actualizar_win_loss_sesion'):
                     sesion = self.iq_bridge._actualizar_win_loss_sesion(is_win) or {
                     }
-                telegram = TelegramNotifier(self.config, self.iq_bridge)
+                telegram = None
+                if getattr(self, 'notificaciones', None) and getattr(self.notificaciones, 'telegram_notifier', None):
+                    telegram = self.notificaciones.telegram_notifier
+                else:
+                    telegram = TelegramNotifier(self.config, self.iq_bridge)
                 telegram.enviar_resultado(
                     par,
                     senal.get('direccion', ''),
@@ -7966,11 +7971,7 @@ class SeguimientoSenales:
                     f"Error enviando resultado a Telegram: {e}")
 
         self.logger.info(
-            f"[SEÑAL {
-                senal['id']}] RESULTADO → {estado_final} | Beneficio={
-                round(
-                    beneficio,
-                    2)}")
+            f"[SEÑAL {senal['id']}] RESULTADO → {estado_final} | Beneficio={round(beneficio,2)}")
 
         try:
             tm = getattr(self, "trading_manager", None)
@@ -8179,8 +8180,7 @@ class AutoTrainer:
         self.intervalo_horas = perfil["intervalo_reentrenamiento_horas"]
         self.min_datos = perfil["min_datos"]
         logger.info(
-            f"AutoTrainer configurado para perfil {modo_actual}: modelo={
-                self.MODELO_PATH}")
+            f"AutoTrainer configurado para perfil {modo_actual}: modelo={self.MODELO_PATH}")
 
     def verificar_y_entrenar(self) -> bool:
         """
@@ -8200,10 +8200,7 @@ class AutoTrainer:
             stats = self.operations_repo.obtener_estadisticas()
             if stats.get('total_trades', 0) < self.min_trades_para_entrenar:
                 logger.info(
-                    f"Insuficientes trades para reentrenar ({
-                        stats.get(
-                            'total_trades', 0)}/{
-                        self.min_trades_para_entrenar})")
+                    f"Insuficientes trades para reentrenar ({stats.get('total_trades', 0)}/{self.min_trades_para_entrenar})")
                 return False
 
             logger.info("Iniciando reentrenamiento automático...")
@@ -8304,9 +8301,7 @@ class AutoTrainer:
             exitosos = df[df['exitoso'] == 1]
             fallidos = df[df['exitoso'] == 0]
             logger.info(
-                f"Trades exitosos: {
-                    len(exitosos)}, Trades fallidos: {
-                    len(fallidos)}")
+                f"Trades exitosos: {len(exitosos)}, Trades fallidos: {len(fallidos)}")
 
             if len(exitosos) == 0 and len(fallidos) == 0:
                 logger.warning("No hay trades para entrenar")
@@ -8346,8 +8341,7 @@ class AutoTrainer:
             df_balanceado = pd.concat([exitosos, fallidos]).sample(
                 frac=1, random_state=42).reset_index(drop=True)
             logger.info(
-                f"Dataset preparado: {
-                    len(df_balanceado)} muestras balanceadas")
+                f"Dataset preparado: {len(df_balanceado)} muestras balanceadas")
             logger.info(
                 f"Distribución final - Exitosos: {len(df_balanceado[df_balanceado['exitoso'] == 1])}, Fallidos: {len(df_balanceado[df_balanceado['exitoso'] == 0])}")
             return df_balanceado
@@ -8383,8 +8377,7 @@ class AutoTrainer:
             # Limitar tamaño del dataset
             if len(dataset) > MAX_MUESTRAS:
                 logger.info(
-                    f"Reduciendo dataset de {
-                        len(dataset)} a {MAX_MUESTRAS} muestras")
+                    f"Reduciendo dataset de {len(dataset)} a {MAX_MUESTRAS} muestras")
                 dataset = dataset.sample(
                     n=MAX_MUESTRAS,
                     random_state=42).reset_index(
@@ -8429,8 +8422,7 @@ class AutoTrainer:
                 with open(ruta_escalador, 'wb') as f:
                     pickle.dump(self.escalador, f)
                 logger.info(
-                    f"Escalador guardado en {ruta_escalador} (perfil: {
-                        self.perfil_actual})")
+                    f"Escalador guardado en {ruta_escalador} (perfil: {self.perfil_actual})")
             except Exception as e:
                 logger.warning(f"No se pudo guardar escalador: {e}")
 
@@ -8460,10 +8452,7 @@ class AutoTrainer:
             # Limitar entre 0.5 y 2.0
             peso_positivo = min(max(peso_positivo, 0.5), 2.0)
             logger.info(
-                f"Balanceo de clases: {
-                    n_positivos:.0f} positivos, {
-                    n_negativos:.0f} negativos, peso={
-                    peso_positivo:.2f}")
+                f"Balanceo de clases: {n_positivos:.0f} positivos, {n_negativos:.0f} negativos, peso={peso_positivo:.2f}")
 
             # Arquitectura LIGERA para bajo consumo de recursos
             class RedNeuronalBinary(nn.Module):
@@ -8571,10 +8560,7 @@ class AutoTrainer:
                         # Early stopping agresivo para entrenamiento rápido
                         if sin_mejora >= paciencia:
                             logger.info(
-                                f"Early stopping en epoch {
-                                    epoch +
-                                    1} con precisión {
-                                    mejor_precision:.1%}")
+                                f"Early stopping en epoch {epoch +1} con precisión {mejor_precision:.1%}")
                             break
 
                 # Liberar memoria periódicamente
@@ -8586,8 +8572,7 @@ class AutoTrainer:
                 modelo.load_state_dict(mejor_modelo_state)
                 self.modelo_actual = modelo
                 logger.info(
-                    f"Mejor precisión alcanzada: {
-                        mejor_precision:.1%}")
+                    f"Mejor precisión alcanzada: {mejor_precision:.1%}")
 
             # 🎯 BONUS: GUARDAR MODELO CON n_features Y METADATA COMPLETA
             if mejor_precision > self.precision_actual:
@@ -8622,8 +8607,7 @@ class AutoTrainer:
                 try:
                     torch.save(checkpoint, ruta_modelo)
                     logger.info(
-                        f"✅ Modelo guardado en {ruta_modelo} con {n_features} features ({
-                            self.perfil_actual})")
+                        f"✅ Modelo guardado en {ruta_modelo} con {n_features} features ({self.perfil_actual})")
                     logger.info(f"   Features: {features_disponibles}")
                     logger.info(f"   Precisión: {mejor_precision:.2%}")
                     return True
@@ -8678,10 +8662,7 @@ class AutoTrainer:
                 }
                 torch.save(checkpoint, self.MODELO_PATH)
                 logger.info(
-                    f"Modelo guardado en {
-                        self.MODELO_PATH} (perfil: {
-                        self.perfil_actual}) con precisión {
-                        self.precision_actual:.1%}")
+                    f"Modelo guardado en {self.MODELO_PATH} (perfil: {self.perfil_actual}) con precisión {self.precision_actual:.1%}")
                 # Guardar escalador si existe
                 if hasattr(self, 'escalador'):
                     try:
@@ -8789,14 +8770,10 @@ class AutoTrainer:
                         logger.warning(f"No se pudo cargar escalador: {e}")
 
                 logger.info(
-                    f"Modelo cargado desde {
-                        self.MODELO_PATH} (perfil: {perfil_guardado}) con precisión {
-                        self.precision_actual:.1%} ({arquitectura})")
+                    f"Modelo cargado desde {self.MODELO_PATH} (perfil: {perfil_guardado}) con precisión {self.precision_actual:.1%} ({arquitectura})")
             else:
                 logger.info(
-                    f"No existe modelo para perfil {
-                        self.perfil_actual} en {
-                        self.MODELO_PATH}")
+                    f"No existe modelo para perfil {self.perfil_actual} en {self.MODELO_PATH}")
         except Exception as e:
             logger.warning(f"No se pudo cargar modelo: {e}")
             self.modelo_actual = None
@@ -8834,9 +8811,7 @@ class CacheDatos:
         """Obtiene datos del caché si están disponibles y no han expirado"""
         if not self.config.HABILITAR_CACHE:
             return None
-        clave = f"{simbolo}_{timeframe}_{
-            start_date.strftime('%Y%m%d')}_{
-            end_date.strftime('%Y%m%d')}"
+        clave = f"{simbolo}_{timeframe}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
         if clave in self.cache:
             entry = self.cache[clave]
             if self._es_chunked(entry):
@@ -8875,9 +8850,7 @@ class CacheDatos:
         """Guarda datos en el caché con control de tamaño"""
         if not self.config.HABILITAR_CACHE or datos.empty:
             return
-        clave = f"{simbolo}_{timeframe}_{
-            start_date.strftime('%Y%m%d')}_{
-            end_date.strftime('%Y%m%d')}"
+        clave = f"{simbolo}_{timeframe}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
         if self.chunk_rows > 0 and len(datos) > self.chunk_rows:
             chunks = []
             total_size = 0
@@ -9764,8 +9737,7 @@ class IQOptionBridge:
                 # Verificar conexión y reconectar si es necesario
                 if not self.connected or not self._sync_check_connect():
                     logger.info(
-                        f"⚠️ {simbolo}: Reconectando antes de get_candles (intento {
-                            intento + 1})...")
+                        f"⚠️ {simbolo}: Reconectando antes de get_candles (intento {intento + 1})...")
                     if not self._reconectar_websocket():
                         logger.error(f"❌ {simbolo}: Reconexión fallida")
                         return []
@@ -9799,13 +9771,11 @@ class IQOptionBridge:
                         self._candles_timeout_log = [
                             t for t in self._candles_timeout_log if now - t <= window]
                     logger.debug(
-                        f"✅ {simbolo}: {
-                            len(result)} velas obtenidas (tf={timeframe_segundos}s)")
+                        f"✅ {simbolo}: {len(result)} velas obtenidas (tf={timeframe_segundos}s)")
                     return result
                 else:
                     logger.warning(
-                        f"⚠️ {simbolo}: get_candles devolvió {
-                            len(result) if result else 0} velas (insuficiente)")
+                        f"⚠️ {simbolo}: get_candles devolvió {len(result) if result else 0} velas (insuficiente)")
                     raise ValueError("Velas insuficientes")
 
             except Exception as e:
@@ -10017,9 +9987,7 @@ class IQOptionBridge:
                     # Reducir verbosidad de logs de error
                     if attempt == 2:  # Solo logear en último intento fallido
                         logging.warning(
-                            f"Intento {
-                                attempt +
-                                1}/3 fallido al iniciar stream para {simbolo}")
+                            f"Intento {attempt +1}/3 fallido al iniciar stream para {simbolo}")
                     time.sleep(1)
                 except Exception as e:
                     # Log reducido
@@ -10593,8 +10561,7 @@ class IQOptionBridge:
 
             if agregados:
                 logger.info(
-                    f"➕ Agregados {
-                        len(agregados)} nuevos pares: {agregados}")
+                    f"➕ Agregados {len(agregados)} nuevos pares: {agregados}")
                 cambios = True
 
         # 5. Recortar si sobran (Mantener solo pares activos)
@@ -10611,8 +10578,7 @@ class IQOptionBridge:
         if cambios or set(pares_validos) != set(pares_actuales):
             self.config.guardar_configuracion()
             logger.info(
-                f"💾 Configuración guardada y sincronizada: {
-                    len(pares_validos)} pares activos.")
+                f"💾 Configuración guardada y sincronizada: {len(pares_validos)} pares activos.")
 
         return pares_validos
 
@@ -10657,8 +10623,7 @@ class IQOptionBridge:
             # CORRECCIÓN DEL LOG: Solo mostramos el tamaño de nuestra lista
             # objetivo
             logger.info(
-                f"🎯 Objetivo: Escanear {
-                    len(lista_prioridad)} pares predefinidos (Ignorando resto del broker)...")
+                f"🎯 Objetivo: Escanear {len(lista_prioridad)} pares predefinidos (Ignorando resto del broker)...")
 
             # ---------------------------------------------------------
             # 2. OBTENCIÓN DE DATOS (API)
@@ -10746,9 +10711,7 @@ class IQOptionBridge:
             logger.info(f"✅ Escaneo Completado.")
             logger.info(f"   Total Habilitados: {len(lista_final)}/33")
             logger.info(
-                f"   Regulares: {
-                    len(lista_final) -
-                    count_otc} | OTC: {count_otc}")
+                f"   Regulares: {len(lista_final) -count_otc} | OTC: {count_otc}")
             logger.info(f"   Lista Final: {', '.join(lista_final)}")
 
             return lista_final
@@ -10908,14 +10871,12 @@ class IQOptionBridge:
                             break
                         else:
                             logger.warning(
-                                f"Intento {
-                                    intento + 1}/{max_intentos} fallido: {reason}")
+                                f"Intento {intento + 1}/{max_intentos} fallido: {reason}")
                             if intento < max_intentos - 1:
                                 time.sleep(3)  # Esperar antes de reintentar
                     except Exception as e:
                         logger.warning(
-                            f"Intento {
-                                intento + 1}/{max_intentos} excepcion: {e}")
+                            f"Intento {intento + 1}/{max_intentos} excepcion: {e}")
                         check = False
                         reason = str(e)
                         if intento < max_intentos - 1:
@@ -10958,14 +10919,12 @@ class IQOptionBridge:
                         try:
                             self.api.change_balance(self.tipo_cuenta_actual)
                             logger.info(
-                                f"Tipo de cuenta establecido: {
-                                    self.tipo_cuenta_actual}")
+                                f"Tipo de cuenta establecido: {self.tipo_cuenta_actual}")
                             time.sleep(2)  # Espera después de cambiar cuenta
                             break
                         except Exception as e:
                             logger.warning(
-                                f"Error cambiando tipo de cuenta (intento {
-                                    intento_cuenta + 1}): {e}")
+                                f"Error cambiando tipo de cuenta (intento {intento_cuenta + 1}): {e}")
                             time.sleep(1)
 
                     # Obtener información de la cuenta con reintentos
@@ -10973,8 +10932,7 @@ class IQOptionBridge:
                         try:
                             self.balance_actual = self._sync_get_balance()
                             logger.info(
-                                f"Balance actual: ${
-                                    self.balance_actual:.2f}")
+                                f"Balance actual: ${self.balance_actual:.2f}")
                             self.account_info = {
                                 'balance': self.balance_actual}
                             self.ultimo_heartbeat = datetime.now()
@@ -10982,8 +10940,7 @@ class IQOptionBridge:
                             break
                         except Exception as e:
                             logger.warning(
-                                f"Error obteniendo balance (intento {
-                                    intento_balance + 1}): {e}")
+                                f"Error obteniendo balance (intento {intento_balance + 1}): {e}")
                             time.sleep(1)
 
                     # Cargar pares disponibles
@@ -11026,8 +10983,7 @@ class IQOptionBridge:
                             # Limitar a top 20 pares para evitar bloqueo
                             pares_stream = pares_activos[:20]
                             logger.info(
-                                f"⚡ Activando streams de velas para {
-                                    len(pares_stream)} pares (TF: {tf_str})...")
+                                f"⚡ Activando streams de velas para {len(pares_stream)} pares (TF: {tf_str})...")
                             for par in pares_stream:
                                 try:
                                     self.subscribe_candles(par, tf_str)
@@ -11084,8 +11040,7 @@ class IQOptionBridge:
         """Intenta reconectar automáticamente cuando se pierde la conexión WebSocket."""
         if self.intentos_reconexion >= self.max_intentos_reconexion:
             logger.error(
-                f"Máximo de intentos de reconexión alcanzado ({
-                    self.max_intentos_reconexion})")
+                f"Máximo de intentos de reconexión alcanzado ({self.max_intentos_reconexion})")
             # Resetear contador después de un tiempo para permitir nuevos
             # intentos
             self.intentos_reconexion = 0
@@ -11096,9 +11051,7 @@ class IQOptionBridge:
         # Backoff exponencial reducido: empezar en 1s, máximo 30s
         tiempo_espera = min(1 * self.intentos_reconexion, 30)
         logger.info(
-            f"Intento de reconexión {
-                self.intentos_reconexion}/{
-                self.max_intentos_reconexion} en {tiempo_espera}s...")
+            f"Intento de reconexión {self.intentos_reconexion}/{self.max_intentos_reconexion} en {tiempo_espera}s...")
         time.sleep(tiempo_espera)
 
         # Limpiar conexión anterior
@@ -11124,8 +11077,7 @@ class IQOptionBridge:
             return True
         else:
             logger.warning(
-                f"Reconexión fallida, intento {
-                    self.intentos_reconexion}")
+                f"Reconexión fallida, intento {self.intentos_reconexion}")
             return False
 
     def _limpiar_conexion(self):
@@ -11196,8 +11148,7 @@ class IQOptionBridge:
             # Si hay muchos errores consecutivos, reconectar
             if self.errores_consecutivos >= self.max_errores_consecutivos:
                 logger.warning(
-                    f"Demasiados errores consecutivos ({
-                        self.errores_consecutivos}), reconectando...")
+                    f"Demasiados errores consecutivos ({self.errores_consecutivos}), reconectando...")
                 return self.reconectar()
             return self.conexion_estable
         except Exception as e:
@@ -11309,8 +11260,7 @@ class IQOptionBridge:
                     # Cambiar tipo de cuenta (PRACTICE o REAL)
                     await self.api.change_balance(self.tipo_cuenta_actual)
                     logger.info(
-                        f"Tipo de cuenta establecido: {
-                            self.tipo_cuenta_actual}")
+                        f"Tipo de cuenta establecido: {self.tipo_cuenta_actual}")
 
                     # Obtener balance
                     self.balance_actual = await self.api.get_balance()
@@ -11537,8 +11487,7 @@ class IQOptionBridge:
             # Verificar que sea un diccionario
             if not isinstance(all_assets, dict):
                 logger.warning(
-                    f"Respuesta inesperada de get_all_open_time: tipo={
-                        type(all_assets)}")
+                    f"Respuesta inesperada de get_all_open_time: tipo={type(all_assets)}")
                 return resultado
 
             logger.debug(f"Claves de all_assets: {list(all_assets.keys())}")
@@ -11706,29 +11655,17 @@ class IQOptionBridge:
             # Log resumen en consola
             logger.info("=== VERIFICACIÓN DE PARES ===")
             logger.info(
-                f"Fecha: {
-                    resultado['timestamp']}, Día: {
-                    resultado['dia_semana']}")
+                f"Fecha: {resultado['timestamp']}, Día: {resultado['dia_semana']}")
             logger.info(
-                f"BINARIOS: {
-                    resultado['binary']['total_abiertos']} abiertos, {
-                    resultado['binary']['total_cerrados']} cerrados")
+                f"BINARIOS: {resultado['binary']['total_abiertos']} abiertos, {resultado['binary']['total_cerrados']} cerrados")
             logger.info(
-                f"TURBO: {
-                    resultado['turbo']['total_abiertos']} abiertos, {
-                    resultado['turbo']['total_cerrados']} cerrados")
+                f"TURBO: {resultado['turbo']['total_abiertos']} abiertos, {resultado['turbo']['total_cerrados']} cerrados")
             logger.info(
-                f"DIGITALES: {
-                    resultado['digital']['total_abiertos']} abiertos, {
-                    resultado['digital']['total_cerrados']} cerrados")
+                f"DIGITALES: {resultado['digital']['total_abiertos']} abiertos, {resultado['digital']['total_cerrados']} cerrados")
             logger.info(
-                f"OTC: {
-                    resultado['otc']['total_abiertos']} abiertos | FOREX: {
-                    resultado['forex']['total_abiertos']} abiertos")
+                f"OTC: {resultado['otc']['total_abiertos']} abiertos | FOREX: {resultado['forex']['total_abiertos']} abiertos")
             logger.info(
-                f"Mercado Forex: {
-                    resultado['resumen']['mercado_forex']} | Mercado OTC: {
-                    resultado['resumen']['mercado_otc']}")
+                f"Mercado Forex: {resultado['resumen']['mercado_forex']} | Mercado OTC: {resultado['resumen']['mercado_otc']}")
 
         except Exception as e:
             logger.error(f"Error verificando estado de pares: {e}")
@@ -11811,8 +11748,7 @@ class IQOptionBridge:
                 except Exception:
                     continue
             logger.info(
-                f"[API] Total pares abiertos en IQ Option: {
-                    len(pares_abiertos_upper)}")
+                f"[API] Total pares abiertos en IQ Option: {len(pares_abiertos_upper)}")
 
             es_modo_otc = self.es_fin_de_semana()
 
@@ -11837,13 +11773,11 @@ class IQOptionBridge:
                         if datos is not None and len(datos) >= 10:
                             resultado["otc_con_historial"].append(par_otc)
                             logger.info(
-                                f"[HISTORIAL OK] {par_otc}: {
-                                    len(datos)} velas disponibles")
+                                f"[HISTORIAL OK] {par_otc}: {len(datos)} velas disponibles")
                         else:
                             resultado["otc_sin_historial"].append(par_otc)
                             logger.warning(
-                                f"[HISTORIAL INSUFICIENTE] {par_otc}: {
-                                    len(datos) if datos is not None else 0} velas")
+                                f"[HISTORIAL INSUFICIENTE] {par_otc}: {len(datos) if datos is not None else 0} velas")
                     except Exception as e:
                         resultado["otc_sin_historial"].append(par_otc)
                         logger.warning(f"[ERROR HISTORIAL] {par_otc}: {e}")
@@ -11884,8 +11818,7 @@ class IQOptionBridge:
                 f"OTC sin historial: {len(resultado['otc_sin_historial'])} -> {resultado['otc_sin_historial']}")
             if resultado["no_habilitados"]:
                 logger.warning(
-                    f"NO habilitados: {
-                        resultado['no_habilitados']}")
+                    f"NO habilitados: {resultado['no_habilitados']}")
 
             # ========== ACTUALIZAR PARES_TRADING ==========
             if self.es_fin_de_semana():
@@ -11902,8 +11835,7 @@ class IQOptionBridge:
                     self.config.PARES_TRADING = pares_para_trading
                     self.pares_disponibles = pares_para_trading.copy()
                     logger.info(
-                        f"MODO OTC: PARES_TRADING = {
-                            len(pares_para_trading)} pares OTC: {pares_para_trading}")
+                        f"MODO OTC: PARES_TRADING = {len(pares_para_trading)} pares OTC: {pares_para_trading}")
             else:
                 # Entre semana: solo regulares habilitados
                 if resultado["habilitados_regulares"]:
@@ -11951,8 +11883,7 @@ class IQOptionBridge:
                     time.sleep(0.5)
                 self.account_info = {'balance': self.balance_actual}
                 logger.info(
-                    f"✅ Cuenta cambiada exitosamente a {tipo_cuenta}. Balance: ${
-                        self.balance_actual:.2f}")
+                    f"✅ Cuenta cambiada exitosamente a {tipo_cuenta}. Balance: ${self.balance_actual:.2f}")
                 return True
             except Exception as e:
                 logger.error(
@@ -11987,9 +11918,7 @@ class IQOptionBridge:
         # ---------- 1. CACHE LOCAL (DISCO) ----------
         cache_dir = Path(os.path.join(DATOS_DIR, "cache_historico"))
         cache_dir.mkdir(exist_ok=True)
-        clave = f"{simbolo}_{timeframe}_{
-            fecha_inicio.date()}_{
-            fecha_fin.date()}"
+        clave = f"{simbolo}_{timeframe}_{fecha_inicio.date()}_{fecha_fin.date()}"
         archivo_cache = cache_dir / f"{clave}.pkl"
 
         if archivo_cache.exists() and self.config.HABILITAR_CACHE:
@@ -12103,8 +12032,7 @@ class IQOptionBridge:
                     # CRÍTICO: Reconectar si es necesario (WebSocket cerrado)
                     if necesita_reconexion or not self.connected or self.api is None:
                         logger.warning(
-                            f"Reconectando WebSocket antes de intento {
-                                intento + 1}...")
+                            f"Reconectando WebSocket antes de intento {intento + 1}...")
                         self.connected = False  # Forzar estado desconectado
                         # Cerrar conexión anterior y reconectar completamente
                         if self._reconectar_websocket():
@@ -12129,8 +12057,7 @@ class IQOptionBridge:
                     # reconexión
                     if intento < max_intentos - 1:
                         logger.warning(
-                            f"Intento {
-                                intento + 1}/{max_intentos}: Sin datos, reconectando...")
+                            f"Intento {intento + 1}/{max_intentos}: Sin datos, reconectando...")
                         necesita_reconexion = True  # Forzar reconexión en próximo intento
                         time.sleep(2)
                 except Exception as e:
@@ -12181,8 +12108,7 @@ class IQOptionBridge:
             df['tipo_datos'] = 'REAL'
             df['es_otc'] = es_otc
             logger.info(
-                f"Obtenidos {
-                    len(df)} datos reales de IQ Option para {simbolo}")
+                f"Obtenidos {len(df)} datos reales de IQ Option para {simbolo}")
             return df
         except Exception as e:
             logger.error(
@@ -12239,14 +12165,12 @@ class IQOptionBridge:
                 logger.warning(f"No se obtuvieron datos 1m para {simbolo}")
             else:
                 logger.info(
-                    f"Obtenidas {
-                        len(datos_1m)} velas de 1m para {simbolo}")
+                    f"Obtenidas {len(datos_1m)} velas de 1m para {simbolo}")
             if datos_5m.empty:
                 logger.warning(f"No se obtuvieron datos 5m para {simbolo}")
             else:
                 logger.info(
-                    f"Obtenidas {
-                        len(datos_5m)} velas de 5m para {simbolo}")
+                    f"Obtenidas {len(datos_5m)} velas de 5m para {simbolo}")
             return datos_1m, datos_5m
         except Exception as e:
             logger.error(f"Error obteniendo datos OTC dual: {e}")
@@ -12417,8 +12341,7 @@ class IQOptionBridge:
                 # Captura cualquier otro error inesperado (no relacionado con
                 # conexión)
                 logger.error(
-                    f"Error inesperado en intento {
-                        intento + 1} para {simbolo}: {e}")
+                    f"Error inesperado en intento {intento + 1} para {simbolo}: {e}")
                 if intento < max_intentos - 1:
                     time.sleep(min(2 ** intento, 5))
 
@@ -12541,9 +12464,7 @@ class IQOptionBridge:
                 umbral_vivo = max(tf_segundos * multiplicador_umbral, 300)
 
                 if lag_segundos > umbral_vivo:
-                    msg = f"💀 {simbolo} [{timeframe}m]: DATOS MUERTOS detectados. Lag: {
-                        lag_segundos:.0f}s > Umbral: {
-                        umbral_vivo:.0f}s. Última vela: {ts_ultima}"
+                    msg = f"💀 {simbolo} [{timeframe}m]: DATOS MUERTOS detectados. Lag: {lag_segundos:.0f}s > Umbral: {umbral_vivo:.0f}s. Última vela: {ts_ultima}"
                     if self.config.FORZAR_DATOS_REALES:
                         logger.error(msg)
                         return None
@@ -12626,8 +12547,7 @@ class IQOptionBridge:
             df['simbolo'] = simbolo
 
             logger.info(
-                f"✅ {simbolo} [{timeframe}m]: {
-                    len(df)} velas ({tipo_datos}) listas para análisis")
+                f"✅ {simbolo} [{timeframe}m]: {len(df)} velas ({tipo_datos}) listas para análisis")
             return df
 
         except Exception as e:
@@ -12718,8 +12638,7 @@ class IQOptionBridge:
             # Verificar si está pausado por objetivo alcanzado
             if self.config.PAUSADO_POR_OBJETIVO:
                 logger.info(
-                    f"Bot pausado: Objetivo diario ${
-                        self.config.OBJETIVO_GANANCIA_DIARIA:.2f} alcanzado")
+                    f"Bot pausado: Objetivo diario ${self.config.OBJETIVO_GANANCIA_DIARIA:.2f} alcanzado")
                 return {
                     'ejecutado': False,
                     'razon': 'pausado_objetivo_diario'
@@ -12807,8 +12726,7 @@ class IQOptionBridge:
             # Verificar si debemos operar
             if not prediccion.get('operar', False):
                 logger.info(
-                    f"Prediccion {simbolo}: NO OPERAR (confianza {
-                        prediccion['confianza']:.1%} < umbral)")
+                    f"Prediccion {simbolo}: NO OPERAR (confianza {prediccion['confianza']:.1%} < umbral)")
                 return {
                     'ejecutado': False,
                     'razon': 'confianza_insuficiente',
@@ -13013,9 +12931,7 @@ class IQOptionBridge:
                 self.operations_repo.agregar_trade(trade, exitoso)
             else:
                 logger.info(
-                    f"Trade omitido para aprendizaje (filtro activo): {
-                        operacion.get('simbolo')} {
-                        operacion.get('direccion')}")
+                    f"Trade omitido para aprendizaje (filtro activo): {operacion.get('simbolo')} {operacion.get('direccion')}")
             # Actualizar predictor
             self.ensemble_predictor.registrar_resultado(
                 operacion.get('prediccion', {}), exitoso
@@ -13095,9 +13011,7 @@ class IQOptionBridge:
             # Mostrar estadisticas actualizadas
             precision = self.ensemble_predictor.obtener_precision()
             logger.info(
-                f"Resultado registrado: {
-                    'GANADO' if exitoso else 'PERDIDO'} | Precision actual: {
-                    precision:.1%}")
+                f"Resultado registrado: {'GANADO' if exitoso else 'PERDIDO'} | Precision actual: {precision:.1%}")
         except Exception as e:
             logger.error(f"Error registrando resultado: {e}")
 
@@ -13121,8 +13035,7 @@ class IQOptionBridge:
             monto_final = max(1, monto_calculado)
             if monto_final != monto_base:
                 logger.info(
-                    f"Interes compuesto: Capital ${
-                        self.balance_actual:.2f} -> Inversion ${monto_final}")
+                    f"Interes compuesto: Capital ${self.balance_actual:.2f} -> Inversion ${monto_final}")
             return float(monto_final)
         except Exception as e:
             logger.error(f"Error calculando monto compuesto: {e}")
@@ -13217,9 +13130,7 @@ class IQOptionBridge:
                 resultado['alineado'] = True
                 resultado['razon'] = 'OK: 15m filtra, 1m confirma, 5m ejecuta'
             else:
-                resultado['razon'] = f"Confianza alineación insuficiente ({
-                    confianza_combo:.2f} < {
-                    umbral:.2f})"
+                resultado['razon'] = f"Confianza alineación insuficiente ({confianza_combo:.2f} < {umbral:.2f})"
 
             return resultado
         except Exception as e:
@@ -13331,8 +13242,7 @@ class IQOptionBridge:
                 return
             if ahora.date() > self.config.FECHA_ULTIMO_RESET:
                 logger.info(
-                    f"Nuevo día detectado. Reseteando ganancia diaria (anterior: ${
-                        self.config.GANANCIA_HOY:.2f})")
+                    f"Nuevo día detectado. Reseteando ganancia diaria (anterior: ${self.config.GANANCIA_HOY:.2f})")
                 self.config.FECHA_ULTIMO_RESET = ahora.date()
                 self.config.GANANCIA_HOY = 0.0
                 self.config.PAUSADO_POR_OBJETIVO = False
@@ -13354,8 +13264,7 @@ class IQOptionBridge:
             horas_pausado = tiempo_pausado / 3600
             if horas_pausado >= 24:
                 logger.info(
-                    f"Han pasado {
-                        horas_pausado:.1f} horas desde la pausa. Reactivando bot...")
+                    f"Han pasado {horas_pausado:.1f} horas desde la pausa. Reactivando bot...")
                 self.config.PAUSADO_POR_OBJETIVO = False
                 self.config.HORA_PAUSA = None
                 self.config.GANANCIA_HOY = 0.0  # Resetear ganancia
@@ -13376,16 +13285,11 @@ class IQOptionBridge:
             # Acumular ganancia del día
             self.config.GANANCIA_HOY += ganancia
             logger.info(
-                f"Ganancia operación: ${
-                    ganancia:.2f} | Ganancia día: ${
-                    self.config.GANANCIA_HOY:.2f} / ${
-                    self.config.OBJETIVO_GANANCIA_DIARIA:.2f}")
+                f"Ganancia operación: ${ganancia:.2f} | Ganancia día: ${self.config.GANANCIA_HOY:.2f} / ${self.config.OBJETIVO_GANANCIA_DIARIA:.2f}")
             # Verificar si alcanzó objetivo
             if self.config.PAUSA_AL_OBJETIVO and self.config.GANANCIA_HOY >= self.config.OBJETIVO_GANANCIA_DIARIA:
                 logger.info(
-                    f"OBJETIVO DIARIO ALCANZADO: ${
-                        self.config.GANANCIA_HOY:.2f} >= ${
-                        self.config.OBJETIVO_GANANCIA_DIARIA:.2f}")
+                    f"OBJETIVO DIARIO ALCANZADO: ${self.config.GANANCIA_HOY:.2f} >= ${self.config.OBJETIVO_GANANCIA_DIARIA:.2f}")
                 self.config.PAUSADO_POR_OBJETIVO = True
                 self.config.HORA_PAUSA = datetime.now()
                 logger.info(
@@ -13398,9 +13302,7 @@ class IQOptionBridge:
             if stop_loss > 0 and getattr(
                     self.config, "PAUSA_AL_STOP_LOSS", True) and self.config.GANANCIA_HOY <= -abs(stop_loss):
                 logger.info(
-                    f"STOP LOSS DIARIO ALCANZADO: ${
-                        self.config.GANANCIA_HOY:.2f} <= -${
-                        abs(stop_loss):.2f}")
+                    f"STOP LOSS DIARIO ALCANZADO: ${self.config.GANANCIA_HOY:.2f} <= -${abs(stop_loss):.2f}")
                 self.config.PAUSADO_POR_OBJETIVO = True
                 self.config.HORA_PAUSA = datetime.now()
         except Exception as e:
@@ -13471,8 +13373,7 @@ class IQOptionBridge:
                         return None
                 else:
                     logger.error(
-                        f"Resultado de buy() inesperado: {
-                            type(result)} - {result}")
+                        f"Resultado de buy() inesperado: {type(result)} - {result}")
                     return None
             if order_id is None:
                 logger.error("La orden no devolvió un ID válido")
@@ -13892,8 +13793,7 @@ if TORCH_AVAILABLE:
             self._inicializar_pesos()
 
             logger.info(
-                f"Red neuronal inicializada: {tamano_entrada} entradas → {capas_ocultas} → 1 salida (Sigmoid) | Dropout: {
-                    self.dropout}")
+                f"Red neuronal inicializada: {tamano_entrada} entradas → {capas_ocultas} → 1 salida (Sigmoid) | Dropout: {self.dropout}")
 
         def _inicializar_pesos(self):
             """Inicialización Xavier uniforme para todas las capas lineales"""
@@ -13913,13 +13813,10 @@ if TORCH_AVAILABLE:
             """
             if x.dim() != 2:
                 raise ValueError(
-                    f"Entrada debe ser 2D (batch_size, features), recibido: {
-                        x.shape}")
+                    f"Entrada debe ser 2D (batch_size, features), recibido: {x.shape}")
             if x.size(1) != self.tamano_entrada:
                 raise ValueError(
-                    f"Se esperan {
-                        self.tamano_entrada} características, recibidas: {
-                        x.size(1)}")
+                    f"Se esperan {self.tamano_entrada} características, recibidas: {x.size(1)}")
 
             return self.red(x)
 
@@ -13984,9 +13881,7 @@ if TORCH_AVAILABLE:
             modelo.load_state_dict(checkpoint['model_state_dict'])
             modelo.eval()  # Modo evaluación por defecto
             logger.info(
-                f"Modelo cargado desde {ruta} (v{
-                    checkpoint.get(
-                        'version', '1.0')})")
+                f"Modelo cargado desde {ruta} (v{checkpoint.get('version', '1.0')})")
             return modelo
 
         def entrenar(self, X_train: np.ndarray, y_train: np.ndarray,
@@ -14101,8 +13996,7 @@ if TORCH_AVAILABLE:
             os.remove(datos_rel("mejor_modelo.pth"))
 
             logger.info(
-                f"Entrenamiento completado. Mejor loss de validación: {
-                    mejor_loss:.6f}")
+                f"Entrenamiento completado. Mejor loss de validación: {mejor_loss:.6f}")
             return historial
 else:
     # Si no hay PyTorch, esta clase no se usará (el sistema usará
@@ -14499,19 +14393,14 @@ class TradingManager:
             # Validar que la señal sea lo suficientemente fuerte
             if confianza < self.config.UMBRAL_SEÑAL_DESTACADA:
                 logger.info(
-                    f"Confianza {
-                        confianza:.1f}% insuficiente para operar (mínimo: {
-                        self.config.UMBRAL_SEÑAL_DESTACADA}%)")
+                    f"Confianza {confianza:.1f}% insuficiente para operar (mínimo: {self.config.UMBRAL_SEÑAL_DESTACADA}%)")
                 return None
 
             # Validar que no haya operaciones simultáneas
             if len(
                     self.operaciones_abiertas) >= self.config.MAX_OPERACIONES_SIMULTANEAS:
                 logger.info(
-                    f"Ya hay {
-                        len(
-                            self.operaciones_abiertas)} operaciones abiertas. Máximo permitido: {
-                        self.config.MAX_OPERACIONES_SIMULTANEAS}")
+                    f"Ya hay {len(self.operaciones_abiertas)} operaciones abiertas. Máximo permitido: {self.config.MAX_OPERACIONES_SIMULTANEAS}")
                 return None
 
             # Verificar si el mercado está abierto
@@ -14535,8 +14424,7 @@ class TradingManager:
             # Verificar objetivo diario
             if self.config.PAUSADO_POR_OBJETIVO:
                 logger.info(
-                    f"Bot pausado: Objetivo diario ${
-                        self.config.OBJETIVO_GANANCIA_DIARIA:.2f} alcanzado")
+                    f"Bot pausado: Objetivo diario ${self.config.OBJETIVO_GANANCIA_DIARIA:.2f} alcanzado")
                 return None
 
             # Verificar si es tiempo de reentrenar
@@ -14582,9 +14470,7 @@ class TradingManager:
 
             if senal_id:
                 logger.info(
-                    f"Operación iniciada: {par} {direccion} ${
-                        monto_final:.2f} | Confianza: {
-                        confianza:.1f}%")
+                    f"Operación iniciada: {par} {direccion} ${monto_final:.2f} | Confianza: {confianza:.1f}%")
 
                 # Enviar notificación de señal destacada a Telegram
                 if self.config.TELEGRAM_HABILITADO:
@@ -14700,10 +14586,7 @@ class TradingManager:
             monto_final = max(1.0, float(monto_calculado))
 
             logger.info(
-                f"💰 Interés Compuesto: Balance ${
-                    balance:.2f} * {
-                    porcentaje *
-                    100:.1f}% = ${monto_calculado} -> Final: ${monto_final}")
+                f"💰 Interés Compuesto: Balance ${balance:.2f} * {porcentaje *100:.1f}% = ${monto_calculado} -> Final: ${monto_final}")
 
             return float(monto_final)
         except Exception as e:
@@ -14745,8 +14628,7 @@ class TradingManager:
                 ]
 
             logger.info(
-                f"Operación {operacion_id} cerrada manualmente: {resultado} (${
-                    beneficio:.2f})")
+                f"Operación {operacion_id} cerrada manualmente: {resultado} (${beneficio:.2f})")
             return True
         except Exception as e:
             logger.error(f"Error cerrando operación {operacion_id}: {e}")
@@ -14933,8 +14815,7 @@ class AnalizadorMercado:
                     if len(self.trading_manager.obtener_operaciones_activas()
                            ) >= self.max_senales_activas:
                         logger.info(
-                            f"Ya hay {
-                                self.max_senales_activas} operación(es) activa(s). Esperando...")
+                            f"Ya hay {self.max_senales_activas} operación(es) activa(s). Esperando...")
                         break
 
                     # Obtener datos históricos
@@ -15013,19 +14894,12 @@ class AnalizadorMercado:
                                     self.historial_senales = self.historial_senales[-MAX_HISTORIAL_SENALES:]
 
                             logger.info(
-                                f"✅ SEÑAL DESTACADA ENVIADA: {par} {
-                                    senal['accion']} ({
-                                    senal['confianza']:.1f}%)")
+                                f"✅ SEÑAL DESTACADA ENVIADA: {par} {senal['accion']} ({senal['confianza']:.1f}%)")
                             self.ultimo_analisis[par] = ahora
                             self.analisis_activos[par] = ahora
                         else:
                             logger.info(
-                                f"❌ SEÑAL DESCARTADA: {par} {
-                                    senal['accion']} - No alineado (1m={
-                                    alineacion.get(
-                                        'tf_1m', '?')} | 5m={
-                                    alineacion.get(
-                                        'tf_5m', '?')})")
+                                f"❌ SEÑAL DESCARTADA: {par} {senal['accion']} - No alineado (1m={alineacion.get('tf_1m', '?')} | 5m={alineacion.get('tf_5m', '?')})")
 
                 # Limpiar análisis activos antiguos
                 for par in list(self.analisis_activos.keys()):
@@ -15275,8 +15149,7 @@ class AnalizadorMercado:
                         resultados['senales_destacadas'].append(senal_info)
                         resultados['mejores_senales'].append(senal_info)
                         logger.info(
-                            f"✅ Señal DESTACADA detectada: {par} {accion} ({
-                                confianza_total:.1f}%)")
+                            f"✅ Señal DESTACADA detectada: {par} {accion} ({confianza_total:.1f}%)")
 
                 except Exception as e:
                     logger.warning(f"Error analizando {par}: {e}")
@@ -15301,10 +15174,7 @@ class AnalizadorMercado:
             )[:10]  # Top 10 señales
 
             logger.info(
-                f"Escaneo completado: {
-                    resultados['pares_analizados']} pares, {
-                    len(
-                        resultados['senales_destacadas'])} señales destacadas")
+                f"Escaneo completado: {resultados['pares_analizados']} pares, {len(resultados['senales_destacadas'])} señales destacadas")
             return resultados
 
         except Exception as e:
@@ -15391,8 +15261,7 @@ class AnalizadorMercado:
             ) == "REGULAR" else self.config.PERFIL_OTC['modelo_path']
             self.modelo_neuronal.guardar_modelo(ruta_modelo)
 
-            mensaje = f"Modelo entrenado exitosamente. Precisión: {
-                precision:.2%}"
+            mensaje = f"Modelo entrenado exitosamente. Precisión: {precision:.2%}"
             logger.info(mensaje)
             return True, mensaje, precision
 
@@ -15592,9 +15461,7 @@ class AnalizadorMercado:
                 resultado['alineado'] = True
                 resultado['razon'] = 'OK: 15m filtra, 1m confirma, 5m ejecuta'
             else:
-                resultado['razon'] = f"Confianza alineación insuficiente ({
-                    confianza_combo:.2f} < {
-                    umbral:.2f})"
+                resultado['razon'] = f"Confianza alineación insuficiente ({confianza_combo:.2f} < {umbral:.2f})"
 
             return resultado
 
@@ -15647,9 +15514,7 @@ class AnalizadorMercado:
                             'indicadores': indicadores
                         })
                         logger.info(
-                            f"SEÑAL ENCONTRADA: {par} {
-                                senal['accion']} ({
-                                senal['confianza']:.1f}%)")
+                            f"SEÑAL ENCONTRADA: {par} {senal['accion']} ({senal['confianza']:.1f}%)")
 
             except Exception as e:
                 logger.error(f"Error analizando {par}: {e}")
@@ -15688,6 +15553,7 @@ class TelegramNotifier:
         self.timeout = (3.05, 10)
         self._cargar_credenciales_archivo()
         self._inicializar_session()
+        self._estado_senales = {}
         logger.info("TelegramNotifier inicializado")
 
     def _cargar_credenciales_archivo(self):
@@ -15768,6 +15634,22 @@ class TelegramNotifier:
         except Exception as e:
             logger.error(f"Error guardando credenciales de Telegram: {e}")
 
+    def _clave_senal_telegram(self, par: str, direccion: str) -> str:
+        return f"{str(par).upper()}|{str(direccion).upper()}"
+
+    def _registrar_estado_senal(self, par: str, direccion: str, **kwargs):
+        clave = self._clave_senal_telegram(par, direccion)
+        estado = self._estado_senales.get(clave, {
+            'destacada_enviada': False,
+            'confirmada_enviada': False,
+            'confianza': None,
+            'ultimo_update': datetime.now().timestamp()
+        })
+        estado.update(kwargs)
+        estado['ultimo_update'] = datetime.now().timestamp()
+        self._estado_senales[clave] = estado
+        return estado
+
     def enviar_senal_destacada(
             self, par: str, direccion: str, confianza: float = None):
         if not getattr(self.config, 'TELEGRAM_HABILITADO',
@@ -15802,10 +15684,12 @@ class TelegramNotifier:
             if response and response.status_code == 200:
                 logger.info(
                     f"✅ Señal DESTACADA enviada a Telegram: {par} {direccion}")
+                self._registrar_estado_senal(
+                    par, direccion, destacada_enviada=True,
+                    confianza=float(confianza) if confianza is not None else None)
             else:
                 logger.warning(
-                    f"❌ Error enviando señal DESTACADA: {
-                        self._error_descripcion(response) if response else 'sin respuesta'}")
+                    f"❌ Error enviando señal DESTACADA: {self._error_descripcion(response) if response else 'sin respuesta'}")
 
         except Exception as e:
             logger.error(f"Error enviando señal DESTACADA a Telegram: {e}")
@@ -15821,6 +15705,11 @@ class TelegramNotifier:
             return
 
         try:
+            estado = self._estado_senales.get(self._clave_senal_telegram(par, direccion), {})
+            if not bool(estado.get('destacada_enviada')):
+                self.enviar_senal_destacada(par, direccion, confianza)
+                time.sleep(0.5)
+
             # Obtener datos de 5 minutos para el gráfico
             df = self._obtener_datos_para_grafico(
                 par, timeframe="5", cantidad=250)
@@ -15872,10 +15761,12 @@ class TelegramNotifier:
             if response and response.status_code == 200:
                 logger.info(
                     f"✅ Señal CONFIRMADA enviada a Telegram con foto: {par} {direccion}")
+                self._registrar_estado_senal(
+                    par, direccion, confirmada_enviada=True,
+                    confianza=float(confianza) if confianza is not None else None)
             else:
                 logger.warning(
-                    f"❌ Error enviando señal CONFIRMADA: {
-                        self._error_descripcion(response) if response else 'sin respuesta'}")
+                    f"❌ Error enviando señal CONFIRMADA: {self._error_descripcion(response) if response else 'sin respuesta'}")
                 self._enviar_mensaje_confirmacion(par, direccion, confianza)
 
         except Exception as e:
@@ -15907,10 +15798,12 @@ class TelegramNotifier:
             if response and response.status_code == 200:
                 logger.info(
                     f"✅ Señal CONFIRMADA (sin foto) enviada a Telegram: {par} {direccion}")
+                self._registrar_estado_senal(
+                    par, direccion, confirmada_enviada=True,
+                    confianza=float(confianza) if confianza is not None else None)
             else:
                 logger.warning(
-                    f"❌ Error enviando mensaje confirmación: {
-                        self._error_descripcion(response) if response else 'sin respuesta'}")
+                    f"❌ Error enviando mensaje confirmación: {self._error_descripcion(response) if response else 'sin respuesta'}")
 
         except Exception as e:
             logger.error(
@@ -15926,6 +15819,14 @@ class TelegramNotifier:
             return
 
         try:
+            estado = self._estado_senales.get(self._clave_senal_telegram(par, direccion), {})
+            if not bool(estado.get('confirmada_enviada')):
+                confianza_prev = estado.get('confianza')
+                if confianza_prev is None:
+                    confianza_prev = float(getattr(self.config, 'UMBRAL_SEÑAL_CONFIRMADA', 92.0) or 92.0)
+                self.enviar_confirmacion_senal(par, direccion, float(confianza_prev))
+                time.sleep(0.5)
+
             resultado = "✅ GANADA" if exitoso else "❌ PERDIDA"
             color = "🟢" if exitoso else "🔴"
 
@@ -15937,10 +15838,7 @@ class TelegramNotifier:
                         float(wins) /
                         total *
                         100.0) if total > 0 else 0.0
-                    resumen = f"\n📊 *Sesión:* W {
-                        int(wins)} | L {
-                        int(losses)} | WR {
-                        winrate:.1f}%"
+                    resumen = f"\n📊 *Sesión:* W {int(wins)} | L {int(losses)} | WR {winrate:.1f}%"
                 except Exception:
                     resumen = ""
 
@@ -15969,8 +15867,9 @@ class TelegramNotifier:
                     f"✅ Resultado enviado a Telegram: {par} {direccion} {resultado}")
             else:
                 logger.warning(
-                    f"❌ Error enviando resultado: {
-                        self._error_descripcion(response) if response else 'sin respuesta'}")
+                    f"❌ Error enviando resultado: {self._error_descripcion(response) if response else 'sin respuesta'}")
+
+            self._estado_senales.pop(self._clave_senal_telegram(par, direccion), None)
 
         except Exception as e:
             logger.error(f"Error enviando resultado a Telegram: {e}")
@@ -16046,8 +15945,7 @@ class TelegramNotifier:
             }
             self._post(url, json_payload=payload)
             logger.info(
-                f"Notificación de resultado enviada: {simbolo} {texto_res} (${
-                    ganancia:.2f})")
+                f"Notificación de resultado enviada: {simbolo} {texto_res} (${ganancia:.2f})")
 
         except Exception as e:
             logger.error(f"Error enviando notificación de resultado: {e}")
@@ -16286,11 +16184,7 @@ class TelegramNotifier:
             mensaje = (
                 f"📊 *RESUMEN DIARIO - Binary Bot Pro v2.8.4*\n"
                 f"📊 Operaciones: {stats['total_operaciones']}\n"
-                f"✅ Ganadas: {
-                    stats['ganadas']} ({
-                    stats['ganadas'] /
-                    stats['total_operaciones'] *
-                    100:.1f}%)\n"
+                f"✅ Ganadas: {stats['ganadas']} ({stats['ganadas'] /stats['total_operaciones'] *100:.1f}%)\n"
                 f"❌ Perdidas: {stats['perdidas']}\n"
                 f"💰 Beneficio Total: ${stats['beneficio_total']:.2f}\n"
                 f"📈 Lote Actual: ${stats['lote_actual']:.2f}"
@@ -16313,8 +16207,7 @@ class TelegramNotifier:
                 logger.info("✅ Resumen diario enviado a Telegram")
             else:
                 logger.warning(
-                    f"❌ Error enviando resumen diario: {
-                        response.text}")
+                    f"❌ Error enviando resumen diario: {response.text}")
 
         except Exception as e:
             logger.error(f"Error enviando resumen diario a Telegram: {e}")
@@ -16382,8 +16275,7 @@ def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
             # Notificación de sistema operativo (plyer)
             if NOTIFICATIONS_AVAILABLE:
                 titulo = f"🚨 SEÑAL DESTACADA - {par}"
-                mensaje = f"{direccion} | Confianza: {
-                    confianza:.1f}%\nEsperando confirmación (2 min)"
+                mensaje = f"{direccion} | Confianza: {confianza:.1f}%\nEsperando confirmación (2 min)"
                 try:
                     notification.notify(
                         title=titulo,
@@ -16423,9 +16315,7 @@ def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
             # Notificación de sistema operativo (plyer)
             if NOTIFICATIONS_AVAILABLE:
                 titulo = f"💪 SEÑAL FUERTE - {par}"
-                mensaje = f"{direccion} | Confianza: {
-                    confianza:.1f}%\nPrecio: {
-                    precio:.5f} | {fortaleza}"
+                mensaje = f"{direccion} | Confianza: {confianza:.1f}%\nPrecio: {precio:.5f} | {fortaleza}"
                 try:
                     notification.notify(
                         title=titulo,
@@ -16461,8 +16351,7 @@ def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
             # Notificación de sistema operativo (plyer)
             if NOTIFICATIONS_AVAILABLE:
                 titulo = f"🎯 SEÑAL CONFIRMADA - {par}"
-                mensaje = f"{direccion} | Confianza: {
-                    confianza:.1f}%\n¡EJECUCIÓN INMEDIATA!"
+                mensaje = f"{direccion} | Confianza: {confianza:.1f}%\n¡EJECUCIÓN INMEDIATA!"
                 try:
                     notification.notify(
                         title=titulo,
@@ -16494,8 +16383,7 @@ def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
                 resultado = "GANADA" if exitoso else "PERDIDA"
                 color = "✅" if exitoso else "❌"
                 titulo = f"{color} OPERACIÓN CERRADA - {par}"
-                mensaje = f"{direccion} | {resultado} | Beneficio: ${
-                    beneficio:+.2f}"
+                mensaje = f"{direccion} | {resultado} | Beneficio: ${beneficio:+.2f}"
                 try:
                     notification.notify(
                         title=titulo,
@@ -16532,10 +16420,8 @@ def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
                     titulo = "📊 RESUMEN DIARIO - Binary Bot Pro v2.8.4"
                     mensaje = (
                         f"Operaciones: {estadisticas['total_operaciones']}\n"
-                        f"Tasa de acierto: {
-                            estadisticas['tasa_acierto']:.1f}%\n"
-                        f"Beneficio total: ${
-                            estadisticas['beneficio_total']:.2f}\n"
+                        f"Tasa de acierto: {estadisticas['tasa_acierto']:.1f}%\n"
+                        f"Beneficio total: ${estadisticas['beneficio_total']:.2f}\n"
                         f"Lote actual: ${estadisticas['lote_actual']:.2f}"
                     )
 
@@ -16592,10 +16478,7 @@ def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
                 # Notificación de sistema
                 if NOTIFICATIONS_AVAILABLE:
                     titulo = f"🚀 OPERACIÓN ABIERTA - {par}"
-                    mensaje = f"{direccion} | Confianza: {
-                        confianza:.1f}% | Lote: ${
-                        operacion.get(
-                            'monto', 0):.2f}"
+                    mensaje = f"{direccion} | Confianza: {confianza:.1f}% | Lote: ${operacion.get('monto', 0):.2f}"
                     try:
                         notification.notify(
                             title=titulo,
@@ -16780,9 +16663,7 @@ class _TrainingThread_DEPRECATED(QThread):
             modo_mercado = market_resolver.resolver()
             fecha_inicio, fecha_fin = market_resolver.obtener_rango_fechas()
             logger.info(
-                f"Entrenamiento en modo: {
-                    modo_mercado['modo']} - Usando {
-                    modo_mercado['dias_historicos']} días de historial")
+                f"Entrenamiento en modo: {modo_mercado['modo']} - Usando {modo_mercado['dias_historicos']} días de historial")
 
             # ✅ USAR EL ANALIZADOR DE MERCADO EXISTENTE PARA OBTENER LOS DATOS
             # El analizador_mercado ya tiene acceso a iq_bridge, config, y
@@ -16811,8 +16692,7 @@ class _TrainingThread_DEPRECATED(QThread):
         except Exception as e:
             logger.error(f"Error en hilo de entrenamiento: {e}", exc_info=True)
             self.training_error.emit(
-                f"Error crítico en entrenamiento: {
-                    str(e)}")
+                f"Error crítico en entrenamiento: {str(e)}")
 
     def _ejecutar_entrenamiento(self) -> Tuple[bool, str, float]:
         """
@@ -16831,8 +16711,7 @@ class _TrainingThread_DEPRECATED(QThread):
                 # Obtener precisión actual del predictor
                 precision = self.auto_trainer.precision_actual if hasattr(
                     self.auto_trainer, 'precision_actual') else 0.0
-                mensaje = f"✅ Entrenamiento completado. Nueva precisión: {
-                    precision:.1%}"
+                mensaje = f"✅ Entrenamiento completado. Nueva precisión: {precision:.1%}"
                 return True, mensaje, precision
             else:
                 mensaje = "⚠️ No se pudo reentrenar el modelo. Verifique los datos históricos."
@@ -16978,9 +16857,7 @@ class TrainingThread(QThread):
             tipos_datos = {'REAL': 0, 'SINTETICO': 0, 'CACHE': 0}
 
             logger.info(
-                f"Obteniendo datos de entrenamiento desde {
-                    fecha_inicio.strftime('%Y-%m-%d')} hasta {
-                    fecha_fin.strftime('%Y-%m-%d')}")
+                f"Obteniendo datos de entrenamiento desde {fecha_inicio.strftime('%Y-%m-%d')} hasta {fecha_fin.strftime('%Y-%m-%d')}")
 
             # VERIFICAR CONEXIÓN UNA VEZ antes de iterar sobre pares
             if not self.iq_bridge.connected:
@@ -16998,8 +16875,7 @@ class TrainingThread(QThread):
             # Reducido a 5 pares
             pares_entrenamiento = self.config.PARES_TRADING[:5]
             logger.info(
-                f"Procesando {
-                    len(pares_entrenamiento)} pares para entrenamiento")
+                f"Procesando {len(pares_entrenamiento)} pares para entrenamiento")
 
             for indice, par in enumerate(pares_entrenamiento):
                 try:
@@ -17018,8 +16894,7 @@ class TrainingThread(QThread):
                     min_datos = getattr(self.config, 'MIN_DATOS_POR_PAR', 50)
                     if datos.empty or len(datos) < min_datos:
                         logger.warning(
-                            f"Par {par}: Datos insuficientes ({
-                                len(datos)} < {min_datos}), saltando...")
+                            f"Par {par}: Datos insuficientes ({len(datos)} < {min_datos}), saltando...")
                         continue  # Continuar con el siguiente par, no abortar
 
                     # Contar tipos de datos
@@ -17057,8 +16932,7 @@ class TrainingThread(QThread):
                         pares_con_datos += 1
                         total_registros += len(datos_con_indicadores)
                         logger.info(
-                            f"Par {par}: {
-                                len(datos_con_indicadores)} registros válidos agregados")
+                            f"Par {par}: {len(datos_con_indicadores)} registros válidos agregados")
                     else:
                         logger.warning(
                             f"Par {par}: Sin datos después de calcular indicadores, saltando...")
@@ -17070,19 +16944,9 @@ class TrainingThread(QThread):
                     continue
 
             logger.info(
-                f"Resumen de datos: {pares_con_datos}/{
-                    len(pares_entrenamiento)} pares con datos, {total_registros} registros totales")
+                f"Resumen de datos: {pares_con_datos}/{len(pares_entrenamiento)} pares con datos, {total_registros} registros totales")
             logger.info(
-                f"Tipos de datos: REAL={
-                    tipos_datos.get(
-                        'REAL',
-                        0)}, SINTETICO={
-                    tipos_datos.get(
-                        'SINTETICO',
-                        0)}, CACHE={
-                    tipos_datos.get(
-                        'CACHE',
-                        0)}")
+                f"Tipos de datos: REAL={tipos_datos.get('REAL',0)}, SINTETICO={tipos_datos.get('SINTETICO',0)}, CACHE={tipos_datos.get('CACHE',0)}")
 
             if not datos_entrenamiento:
                 self.finished.emit({
@@ -17112,16 +16976,14 @@ class TrainingThread(QThread):
                                         pd.api.types.is_numeric_dtype(df_total[col])]
 
             logger.info(
-                f"Número de características detectadas: {
-                    len(columnas_caracteristicas)}")
+                f"Número de características detectadas: {len(columnas_caracteristicas)}")
 
             # Actualizar el tamaño de entrada si es necesario
             tamano_entrada = getattr(
                 self.config, 'TAMANO_ENTRADA_NEURONAL', 27)
             if len(columnas_caracteristicas) != tamano_entrada:
                 logger.warning(
-                    f"Ajustando tamaño de entrada de {tamano_entrada} a {
-                        len(columnas_caracteristicas)}")
+                    f"Ajustando tamaño de entrada de {tamano_entrada} a {len(columnas_caracteristicas)}")
                 self.config.TAMANO_ENTRADA_NEURONAL = len(
                     columnas_caracteristicas)
                 tamano_entrada = len(columnas_caracteristicas)
@@ -17134,9 +16996,7 @@ class TrainingThread(QThread):
             y = df_total['target'].values
 
             logger.info(
-                f"Datos preparados: X shape={
-                    X.shape}, y shape={
-                    y.shape}")
+                f"Datos preparados: X shape={X.shape}, y shape={y.shape}")
 
             # Dividir datos
             test_size = 1 - getattr(self.config,
@@ -17146,9 +17006,7 @@ class TrainingThread(QThread):
             )
 
             logger.info(
-                f"Datos divididos: Train={
-                    X_train.shape}, Test={
-                    X_test.shape}")
+                f"Datos divididos: Train={X_train.shape}, Test={X_test.shape}")
 
             # Escalar datos
             escalador = StandardScaler()
@@ -17178,10 +17036,7 @@ class TrainingThread(QThread):
                 pos_weight = torch.FloatTensor(
                     [class_counts[0] / (class_counts[1] + 1)])
                 logger.info(
-                    f"Balance de clases - PUT(0): {
-                        class_counts[0]}, CALL(1): {
-                        class_counts[1]}, pos_weight: {
-                        pos_weight.item():.2f}")
+                    f"Balance de clases - PUT(0): {class_counts[0]}, CALL(1): {class_counts[1]}, pos_weight: {pos_weight.item():.2f}")
 
                 # Definir optimizador con weight decay y pérdida binaria
                 tasa_aprendizaje = getattr(
@@ -17259,25 +17114,17 @@ class TrainingThread(QThread):
                                 mejor_modelo_state = modelo.state_dict().copy()
                                 sin_mejora = 0
                                 logger.info(
-                                    f"Epoch {
-                                        epoch + 1}/{epoch_cantidad} | Loss: {
-                                        avg_loss:.4f} | Precision: {
-                                        accuracy * 100:.2f}% (MEJOR)")
+                                    f"Epoch {epoch + 1}/{epoch_cantidad} | Loss: {avg_loss:.4f} | Precision: {accuracy * 100:.2f}% (MEJOR)")
                             else:
                                 sin_mejora += 1
                                 if epoch % 20 == 0:
                                     logger.info(
-                                        f"Epoch {
-                                            epoch + 1}/{epoch_cantidad} | Loss: {
-                                            avg_loss:.4f} | Precision: {
-                                            accuracy * 100:.2f}%")
+                                        f"Epoch {epoch + 1}/{epoch_cantidad} | Loss: {avg_loss:.4f} | Precision: {accuracy * 100:.2f}%")
 
                             # Early stopping
                             if sin_mejora >= paciencia // 5:
                                 logger.info(
-                                    f"Early stopping en epoch {
-                                        epoch + 1}, mejor precision: {
-                                        mejor_precision * 100:.2f}%")
+                                    f"Early stopping en epoch {epoch + 1}, mejor precision: {mejor_precision * 100:.2f}%")
                                 break
 
                 # Cargar mejor modelo
@@ -17333,8 +17180,7 @@ class TrainingThread(QThread):
                     pickle.dump(escalador, f)
 
                 logger.info(
-                    f"Modelo {perfil} guardado en {ruta_modelo} con precisión {
-                        accuracy * 100:.2f}%")
+                    f"Modelo {perfil} guardado en {ruta_modelo} con precisión {accuracy * 100:.2f}%")
 
                 self.finished.emit({
                     'success': True,
@@ -17497,8 +17343,7 @@ class ColdStartAIThread(QThread):
 
             for i, par in enumerate(pares, start=1):
                 self.progress.emit(
-                    f"🧊 Cold Start IA: descargando {par} ({i}/{
-                        len(pares)}) | velas_par={velas_por_par} | total={total_velas}"
+                    f"🧊 Cold Start IA: descargando {par} ({i}/{len(pares)}) | velas_par={velas_por_par} | total={total_velas}"
                 )
                 chunk_fetch = int(
                     getattr(self.config, "COLDSTART_CHUNK_SIZE", 600) or 600)
@@ -17547,8 +17392,7 @@ class ColdStartAIThread(QThread):
                 combined_df = combined_df.tail(
                     max_train_rows).reset_index(drop=True)
             self.progress.emit(
-                f"🧊 Cold Start IA: entrenando con {
-                    len(combined_df)} velas")
+                f"🧊 Cold Start IA: entrenando con {len(combined_df)} velas")
             ai_engine.cold_start_training(combined_df)
 
             ok = bool(getattr(ai_engine, "_is_initialized", False))
@@ -17623,8 +17467,7 @@ class LiveUpdateWorker(QObject):
                 # Verificar timeout global
                 if time.time() - start_time > max_time:
                     logger.debug(
-                        f"[LIVE] Timeout alcanzado, procesados {
-                            len(resultados)} pares")
+                        f"[LIVE] Timeout alcanzado, procesados {len(resultados)} pares")
                     break
 
                 try:
@@ -17883,9 +17726,7 @@ class ScanThread(QThread):
                 senales_detectadas = resultados.get('senales_detectadas') or []
                 logger.info(
                     f"[SCAN_THREAD] Escaneo finalizado. "
-                    f"Pares analizados: {
-                        resultados.get(
-                            'pares_analizados', 0)} | "
+                    f"Pares analizados: {resultados.get('pares_analizados', 0)} | "
                     f"Señales detectadas: {len(senales_detectadas)}"
                 )
                 self.finished.emit(resultados)
@@ -19102,8 +18943,7 @@ class ConfiguracionDialog(QDialog):
                     with open("IQ_Option_pares_detectados.json", "w") as f:
                         json.dump(data, f, indent=2)
                     logger.info(
-                        f"Guardados {
-                            len(pares)} pares en IQ_Option_pares_detectados.json")
+                        f"Guardados {len(pares)} pares en IQ_Option_pares_detectados.json")
                 except Exception as e:
                     logger.warning(f"Error guardando pares: {e}")
 
@@ -19291,47 +19131,23 @@ class ConfiguracionDialog(QDialog):
             mensaje += f"{'=' * 50}\n\n"
             mensaje += f"Fecha: {resultado.get('timestamp', 'N/A')[:19]}\n"
             mensaje += f"Día: {resultado.get('dia_semana', 'N/A')}\n"
-            mensaje += f"Fin de semana: {
-                'Sí' if resultado.get(
-                    'es_fin_de_semana',
-                    False) else 'No'}\n\n"
+            mensaje += f"Fin de semana: {'Sí' if resultado.get('es_fin_de_semana',False) else 'No'}\n\n"
 
             mensaje += f"{'=' * 50}\n"
             mensaje += f"RESUMEN DE MERCADOS:\n"
             mensaje += f"{'=' * 50}\n\n"
 
             resumen = resultado.get('resumen', {})
-            mensaje += f"Mercado FOREX: {
-                resumen.get(
-                    'mercado_forex',
-                    'N/A')}\n"
+            mensaje += f"Mercado FOREX: {resumen.get('mercado_forex','N/A')}\n"
             mensaje += f"Mercado OTC: {resumen.get('mercado_otc', 'N/A')}\n\n"
 
             binary = resultado.get('binary', {})
             turbo = resultado.get('turbo', {})
             digital = resultado.get('digital', {})
 
-            mensaje += f"BINARIOS: {
-                binary.get(
-                    'total_abiertos',
-                    0)} abiertos, {
-                binary.get(
-                    'total_cerrados',
-                    0)} cerrados\n"
-            mensaje += f"TURBO: {
-                turbo.get(
-                    'total_abiertos',
-                    0)} abiertos, {
-                turbo.get(
-                    'total_cerrados',
-                    0)} cerrados\n"
-            mensaje += f"DIGITALES: {
-                digital.get(
-                    'total_abiertos',
-                    0)} abiertos, {
-                digital.get(
-                    'total_cerrados',
-                    0)} cerrados\n\n"
+            mensaje += f"BINARIOS: {binary.get('total_abiertos',0)} abiertos, {binary.get('total_cerrados',0)} cerrados\n"
+            mensaje += f"TURBO: {turbo.get('total_abiertos',0)} abiertos, {turbo.get('total_cerrados',0)} cerrados\n"
+            mensaje += f"DIGITALES: {digital.get('total_abiertos',0)} abiertos, {digital.get('total_cerrados',0)} cerrados\n\n"
 
             # Información de pares habilitados para 5 minutos
             mensaje += f"{'=' * 50}\n"
@@ -19354,9 +19170,7 @@ class ConfiguracionDialog(QDialog):
                 mensaje += "\n"
 
             mensaje += f"{'=' * 50}\n"
-            mensaje += f"PARES BINARIOS ABIERTOS ({
-                binary.get(
-                    'total_abiertos', 0)}):\n"
+            mensaje += f"PARES BINARIOS ABIERTOS ({binary.get('total_abiertos', 0)}):\n"
             mensaje += f"{'=' * 50}\n\n"
 
             # Mostrar pares OTC abiertos
@@ -19382,9 +19196,7 @@ class ConfiguracionDialog(QDialog):
             if binary.get('total_cerrados', 0) > 0 and binary.get(
                     'total_cerrados', 0) < 10:
                 mensaje += f"{'=' * 50}\n"
-                mensaje += f"PARES BINARIOS CERRADOS ({
-                    binary.get(
-                        'total_cerrados', 0)}):\n"
+                mensaje += f"PARES BINARIOS CERRADOS ({binary.get('total_cerrados', 0)}):\n"
                 mensaje += f"{'=' * 50}\n\n"
                 for par in sorted(cerrados):
                     mensaje += f"  [X] {par}\n"
@@ -19459,9 +19271,7 @@ Bot configurado y listo para enviar señales."""
                         self, "Éxito", "Mensaje de prueba enviado correctamente a Telegram")
                 else:
                     QMessageBox.warning(
-                        self, "Error", f"Error de Telegram: {
-                            result.get(
-                                'description', 'Desconocido')}")
+                        self, "Error", f"Error de Telegram: {result.get('description', 'Desconocido')}")
 
         except urllib.error.HTTPError as e:
             try:
@@ -19475,8 +19285,7 @@ Bot configurado y listo para enviar señales."""
         except urllib.error.URLError as e:
             logger.warning(f"Error de conexión Telegram: {e.reason}")
             QMessageBox.warning(
-                self, "Error", f"Error de conexión: {
-                    e.reason}")
+                self, "Error", f"Error de conexión: {e.reason}")
         except Exception as e:
             logger.error(
                 f"Error enviando mensaje de prueba: {e}",
@@ -19722,8 +19531,7 @@ if GUI_AVAILABLE:
                     pares_iniciales.extend(self.config.PARES_OTC_MAYORES)
 
                 self.log_mensaje(
-                    f"✅ Cargando {
-                        len(pares_iniciales)} pares en tabla...")
+                    f"✅ Cargando {len(pares_iniciales)} pares en tabla...")
 
                 # Limpiar y llenar tabla
                 self.tabla_analisis.setRowCount(0)
@@ -19746,8 +19554,7 @@ if GUI_AVAILABLE:
                         fila, 7, QTableWidgetItem("PENDIENTE"))
 
                 self.log_mensaje(
-                    f"✅ {
-                        len(pares_iniciales)} pares cargados en GUI")
+                    f"✅ {len(pares_iniciales)} pares cargados en GUI")
             except Exception as e:
                 logger.error(f"Error cargando pares iniciales: {e}")
 
@@ -19888,8 +19695,7 @@ if GUI_AVAILABLE:
                 return
 
             self.log_message(
-                f"✅ {
-                    len(pares_habilitados)} pares habilitados detectados")
+                f"✅ {len(pares_habilitados)} pares habilitados detectados")
 
             # ==================================================
             # 4. ACTUALIZAR CONFIGURACIÓN GLOBAL
@@ -19964,8 +19770,7 @@ if GUI_AVAILABLE:
 
                 combined_df = pd.concat(all_training_data, ignore_index=True)
                 self.log_message(
-                    f"📊 Total histórico: {
-                        len(combined_df)} velas")
+                    f"📊 Total histórico: {len(combined_df)} velas")
 
                 try:
                     ai_engine.cold_start_training(combined_df)
@@ -20050,10 +19855,7 @@ if GUI_AVAILABLE:
 
                     # Mostrar en GUI (Log o Label)
                     self.log_message(
-                        f"{
-                            self.config.ACTIVO} | IA: {
-                            resultado['confianza']:.1f}% | {
-                            resultado['accion']}")
+                        f"{self.config.ACTIVO} | IA: {resultado['confianza']:.1f}% | {resultado['accion']}")
 
                     # 5. Ejecutar Orden
                     if resultado['accion'] in ['CALL', 'PUT']:
@@ -20096,8 +19898,7 @@ if GUI_AVAILABLE:
 
                         if id_compra:
                             self.log_message(
-                                f">>> ENTRADA: {
-                                    direction.upper()} | ID: {id_compra}")
+                                f">>> ENTRADA: {direction.upper()} | ID: {id_compra}")
                             self.trading_activos += 1
 
                             # Esperar resultado
@@ -20960,8 +20761,7 @@ if GUI_AVAILABLE:
                             self.lbl_precision_modelo.setText(
                                 f"{precision:.2f}%")
                             self.log_mensaje(
-                                f"Precisión del modelo: {
-                                    precision:.2f}%")
+                                f"Precisión del modelo: {precision:.2f}%")
 
                             ultimo_entrenamiento = checkpoint.get(
                                 'ultimo_entrenamiento', checkpoint.get(
@@ -21019,8 +20819,7 @@ if GUI_AVAILABLE:
                             self.lbl_precision_modelo.setText(
                                 f"{precision:.2f}%")
                             self.log_mensaje(
-                                f"Modelo alternativo cargado. Precisión: {
-                                    precision:.2f}%")
+                                f"Modelo alternativo cargado. Precisión: {precision:.2f}%")
                             if self.iq_bridge.connected:
                                 self.btn_escanear.setEnabled(True)
                     except Exception as e:
@@ -21083,8 +20882,7 @@ if GUI_AVAILABLE:
                     pares_usados = resultado.get('pares_usados', 0)
                     registros_usados = resultado.get('registros_usados', 0)
                     self.log_mensaje(
-                        f"Modelo entrenado exitosamente. Precisión: {
-                            precision:.2f}%")
+                        f"Modelo entrenado exitosamente. Precisión: {precision:.2f}%")
                     self.log_mensaje(
                         f"Pares utilizados: {pares_usados}, Registros: {registros_usados}")
 
@@ -21320,8 +21118,7 @@ if GUI_AVAILABLE:
                 self.tabla_analisis.setSortingEnabled(True)
 
                 logger.debug(
-                    f"✅ Tabla actualizada con {
-                        len(resultados_detalle)} pares.")
+                    f"✅ Tabla actualizada con {len(resultados_detalle)} pares.")
 
             except Exception as e:
                 logger.error(
@@ -21950,8 +21747,7 @@ if GUI_AVAILABLE:
                 QMessageBox.critical(
                     self,
                     "Error",
-                    f"No se pudo limpiar la caché: {
-                        str(e)}")
+                    f"No se pudo limpiar la caché: {str(e)}")
 
         def mostrar_acerca_de(self):
             """Muestra el diálogo Acerca de"""
@@ -22155,8 +21951,7 @@ if GUI_AVAILABLE:
             self.refrescar_pares_gui()
 
             self.log_mensaje(
-                f"✅ {
-                    len(pares)} pares actualizados desde IQ Option.")
+                f"✅ {len(pares)} pares actualizados desde IQ Option.")
             self._iniciar_cold_start_ia()
 
             # Guardar marca de tiempo
@@ -22240,13 +22035,10 @@ if GUI_AVAILABLE:
                     velas = resultado.get("velas", 0)
                     pares = resultado.get("pares", [])
                     self.log_mensaje(
-                        f"✅ Cold Start IA COMPLETADO | velas={velas} | pares={
-                            len(pares)}")
+                        f"✅ Cold Start IA COMPLETADO | velas={velas} | pares={len(pares)}")
                 else:
                     self.log_mensaje(
-                        f"⚠️ Cold Start IA falló: {
-                            resultado.get(
-                                'error', 'desconocido')}")
+                        f"⚠️ Cold Start IA falló: {resultado.get('error', 'desconocido')}")
             except Exception:
                 return
 
@@ -22382,8 +22174,7 @@ if GUI_AVAILABLE:
                 # para cumplir con el requerimiento de GUI limpia
                 if len(pares) > 33:
                     self.log_mensaje(
-                        f"⚠️ Recortando lista visual de {
-                            len(pares)} a 33 pares...")
+                        f"⚠️ Recortando lista visual de {len(pares)} a 33 pares...")
                     pares = pares[:33]
 
                 if not pares or len(pares) == 0:
@@ -22588,8 +22379,7 @@ def run_headless_mode():
         logger.info(f"Tipo de cuenta: {config.TIPO_CUENTA}")
         logger.info(f"Capital inicial: ${config.CAPITAL_INICIAL}")
         logger.info(
-            f"Porcentaje por operacion: {
-                config.PORCENTAJE_INVERSION * 100}%")
+            f"Porcentaje por operacion: {config.PORCENTAJE_INVERSION * 100}%")
 
         # =============================
         # Inicializar bridge IQ Option
@@ -22613,8 +22403,7 @@ def run_headless_mode():
         max_reintentos = 3
         for intento in range(max_reintentos):
             logger.info(
-                f"Intento de conexión {
-                    intento + 1}/{max_reintentos}...")
+                f"Intento de conexión {intento + 1}/{max_reintentos}...")
             if bridge.connect():
                 break
             logger.warning("Fallo de conexión, esperando 5 segundos...")
@@ -22661,11 +22450,7 @@ def run_headless_mode():
         stats = operations_repo.obtener_estadisticas()
         if stats.get('total_trades', 0) > 0:
             logger.info(
-                f"📊 Trades históricos cargados: {
-                    stats['total_trades']} (Tasa éxito: {
-                    stats.get(
-                        'tasa_exito_global',
-                        0) * 100:.1f}%)")
+                f"📊 Trades históricos cargados: {stats['total_trades']} (Tasa éxito: {stats.get('tasa_exito_global',0) * 100:.1f}%)")
 
         # Cargar datos históricos de múltiples pares
         all_training_data = []
@@ -22682,8 +22467,7 @@ def run_headless_mode():
                     if datos is not None and len(datos) >= 100:
                         all_training_data.append(datos)
                         logger.info(
-                            f"  ✅ {par}: {
-                                len(datos)} velas (tiempo real)")
+                            f"  ✅ {par}: {len(datos)} velas (tiempo real)")
                     continue
 
                 # Obtener 7 días de datos (1 minuto = 60s, 7 días = 7*24*60 = 10080 velas máx)
@@ -22711,9 +22495,7 @@ def run_headless_mode():
         if all_training_data and bridge.ai_engine:
             combined_df = pd.concat(all_training_data, ignore_index=True)
             logger.info(
-                f"📈 Total datos combinados: {
-                    len(combined_df)} velas de {
-                    len(all_training_data)} pares")
+                f"📈 Total datos combinados: {len(combined_df)} velas de {len(all_training_data)} pares")
 
             bridge.ai_engine.cold_start_training(combined_df)
             logger.info(
@@ -22723,8 +22505,7 @@ def run_headless_mode():
             trades_exitosos = operations_repo.obtener_trades_exitosos()
             if len(trades_exitosos) >= 50:
                 logger.info(
-                    f"🎓 Aprendiendo de {
-                        len(trades_exitosos)} trades exitosos históricos...")
+                    f"🎓 Aprendiendo de {len(trades_exitosos)} trades exitosos históricos...")
                 # Los patrones de trades exitosos se usan en EnsemblePredictor
         else:
             logger.warning(
@@ -22898,9 +22679,7 @@ def run_headless_mode():
                                         trade_record, is_win)
 
                                     logger.info(
-                                        f"[PAPER] {
-                                            trade['par']} {direction}: {
-                                            '✅ WIN' if is_win else '❌ LOSS'} | Trade {trades_ejecutados}/{MAX_TRADES_SESION}")
+                                        f"[PAPER] {trade['par']} {direction}: {'✅ WIN' if is_win else '❌ LOSS'} | Trade {trades_ejecutados}/{MAX_TRADES_SESION}")
 
                                     completed_trades.append(trade)
                             except Exception as e:
@@ -22961,9 +22740,7 @@ def run_headless_mode():
                 # buscar otro
                 if PAPER_TRADING_ENABLED and paper_trades:
                     logger.info(
-                        f"⏳ Esperando resultado del trade activo: {
-                            paper_trades[0]['par']} {
-                            paper_trades[0]['direction']}")
+                        f"⏳ Esperando resultado del trade activo: {paper_trades[0]['par']} {paper_trades[0]['direction']}")
                     time.sleep(5)
                     continue  # Volver al inicio del ciclo para verificar resultado
 
@@ -23092,10 +22869,7 @@ def run_headless_mode():
                             logger.info(
                                 f"📝 [PAPER TRADE ABIERTO] {par} {direccion} @ {current_price:.5f}")
                             logger.info(
-                                f"   IA: {
-                                    confianza_ia:.1f}% + Técnico: {
-                                    confianza_tecnica:.1f}% = Combinado: {
-                                    confianza_combinada:.1f}%")
+                                f"   IA: {confianza_ia:.1f}% + Técnico: {confianza_tecnica:.1f}% = Combinado: {confianza_combinada:.1f}%")
                             logger.info(
                                 f"   ⏳ Esperando {paper_expiracion_segundos}s para verificar resultado...")
                             break  # Solo 1 trade a la vez - salir del loop de pares
@@ -23103,14 +22877,9 @@ def run_headless_mode():
                             if prediccion.get(
                                     'operar', False) and confianza_tecnica >= umbral:
                                 logger.info(
-                                    f"[PAPER] Señal técnica/MM fuerte en {par} ({
-                                        prediccion.get('direccion')}) "
-                                    f"pero NO se ejecuta: IA={
-                                        confianza_ia:.1f}% | Técnico={
-                                        confianza_tecnica:.1f}% | "
-                                    f"Combinado={
-                                        confianza_combinada:.1f}% < umbral {
-                                        umbral:.1f}%"
+                                    f"[PAPER] Señal técnica/MM fuerte en {par} ({prediccion.get('direccion')}) "
+                                    f"pero NO se ejecuta: IA={confianza_ia:.1f}% | Técnico={confianza_tecnica:.1f}% | "
+                                    f"Combinado={confianza_combinada:.1f}% < umbral {umbral:.1f}%"
                                 )
                             else:
                                 logger.debug(
@@ -23122,8 +22891,7 @@ def run_headless_mode():
 
                         # Actualizar Dashboard Real
                         if consola_flotante:
-                            conf_str = f"{
-                                confianza:.1f}%" if 'confianza' in locals() else "--"
+                            conf_str = f"{confianza:.1f}%" if 'confianza' in locals() else "--"
                             consola_flotante.update_dashboard({
                                 "importe": f"${getattr(config, 'MONTO_OPERACION', 1.0)}",
                                 "entrenamiento": f"SI (Conf: {conf_str})",
@@ -23171,9 +22939,7 @@ def run_headless_mode():
 
         # Al terminar la sesión, guardar trades pendientes
         logger.info(
-            f"📊 Sesión finalizada: {trades_ganados}/{trades_ejecutados} ganados ({
-                trades_ganados * 100 / max(
-                    1, trades_ejecutados):.1f}%)")
+            f"📊 Sesión finalizada: {trades_ganados}/{trades_ejecutados} ganados ({trades_ganados * 100 / max(1, trades_ejecutados):.1f}%)")
         operations_repo.guardar_trades()
         logger.info("💾 Trades guardados en trades_exitosos.json")
 
