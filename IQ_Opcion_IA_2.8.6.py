@@ -15554,6 +15554,7 @@ class TelegramNotifier:
         self._cargar_credenciales_archivo()
         self._inicializar_session()
         self._estado_senales = {}
+        self._estado_senales_lock = threading.Lock()
         logger.info("TelegramNotifier inicializado")
 
     def _cargar_credenciales_archivo(self):
@@ -15639,16 +15640,27 @@ class TelegramNotifier:
 
     def _registrar_estado_senal(self, par: str, direccion: str, **kwargs):
         clave = self._clave_senal_telegram(par, direccion)
-        estado = self._estado_senales.get(clave, {
-            'destacada_enviada': False,
-            'confirmada_enviada': False,
-            'confianza': None,
-            'ultimo_update': datetime.now().timestamp()
-        })
-        estado.update(kwargs)
-        estado['ultimo_update'] = datetime.now().timestamp()
-        self._estado_senales[clave] = estado
-        return estado
+        with self._estado_senales_lock:
+            estado = self._estado_senales.get(clave, {
+                'destacada_enviada': False,
+                'confirmada_enviada': False,
+                'confianza': None,
+                'ultimo_update': datetime.now().timestamp()
+            })
+            estado.update(kwargs)
+            estado['ultimo_update'] = datetime.now().timestamp()
+            self._estado_senales[clave] = estado
+            return dict(estado)
+
+    def _obtener_estado_senal(self, par: str, direccion: str) -> dict:
+        clave = self._clave_senal_telegram(par, direccion)
+        with self._estado_senales_lock:
+            return dict(self._estado_senales.get(clave, {}))
+
+    def _limpiar_estado_senal(self, par: str, direccion: str) -> None:
+        clave = self._clave_senal_telegram(par, direccion)
+        with self._estado_senales_lock:
+            self._estado_senales.pop(clave, None)
 
     def enviar_senal_destacada(
             self, par: str, direccion: str, confianza: float = None):
@@ -15705,7 +15717,7 @@ class TelegramNotifier:
             return
 
         try:
-            estado = self._estado_senales.get(self._clave_senal_telegram(par, direccion), {})
+            estado = self._obtener_estado_senal(par, direccion)
             if not bool(estado.get('destacada_enviada')):
                 self.enviar_senal_destacada(par, direccion, confianza)
                 time.sleep(0.5)
@@ -15819,13 +15831,18 @@ class TelegramNotifier:
             return
 
         try:
-            estado = self._estado_senales.get(self._clave_senal_telegram(par, direccion), {})
+            estado = self._obtener_estado_senal(par, direccion)
             if not bool(estado.get('confirmada_enviada')):
                 confianza_prev = estado.get('confianza')
                 if confianza_prev is None:
                     confianza_prev = float(getattr(self.config, 'UMBRAL_SEÑAL_CONFIRMADA', 92.0) or 92.0)
                 self.enviar_confirmacion_senal(par, direccion, float(confianza_prev))
                 time.sleep(0.5)
+                estado = self._obtener_estado_senal(par, direccion)
+                if not bool(estado.get('confirmada_enviada')):
+                    logger.warning(
+                        f"⚠️ Secuencia Telegram abortada para {par} {direccion}: no se pudo enviar confirmación antes del resultado")
+                    return
 
             resultado = "✅ GANADA" if exitoso else "❌ PERDIDA"
             color = "🟢" if exitoso else "🔴"
@@ -15869,7 +15886,7 @@ class TelegramNotifier:
                 logger.warning(
                     f"❌ Error enviando resultado: {self._error_descripcion(response) if response else 'sin respuesta'}")
 
-            self._estado_senales.pop(self._clave_senal_telegram(par, direccion), None)
+            self._limpiar_estado_senal(par, direccion)
 
         except Exception as e:
             logger.error(f"Error enviando resultado a Telegram: {e}")
