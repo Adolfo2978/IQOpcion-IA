@@ -2520,6 +2520,7 @@ class ConfiguracionTrading:
         self.UMBRAL_SEÑAL_DESTACADA = 82.0
         self.UMBRAL_SEÑAL_CONFIRMADA = 90.0
         self.UMBRAL_CONFIANZA_COMBINADA = 88.0
+        self.PERFIL_CONFIG_PRESET = "BALANCEADO"
         self.UMBRAL_COMPRA = 55.0
         self.UMBRAL_IA_DIRECCION = 50.0
         self.UMBRAL_TECNICO_DIRECCION = 48.0
@@ -2982,6 +2983,7 @@ class ConfiguracionTrading:
                     # Paper Trading mode
                     self.MODO_PAPER_TRADING = data.get(
                         "PAPER_TRADING", self.MODO_PAPER_TRADING)
+                    self.PERFIL_CONFIG_PRESET = str(data.get("PERFIL_CONFIG_PRESET", getattr(self, "PERFIL_CONFIG_PRESET", "BALANCEADO"))).upper()
 
                     logger.info(f"Configuración cargada desde {archivo}")
 
@@ -3038,7 +3040,8 @@ class ConfiguracionTrading:
                 "MAX_TRADES_SESION": self.MAX_TRADES_SESION,
                 "TIPO_CUENTA": self.TIPO_CUENTA,
                 "PAPER_TRADING": self.MODO_PAPER_TRADING,
-                "PARES_TRADING": self.PARES_TRADING
+                "PARES_TRADING": self.PARES_TRADING,
+                "PERFIL_CONFIG_PRESET": self.PERFIL_CONFIG_PRESET
             }
 
             data.update(updates)
@@ -3048,6 +3051,51 @@ class ConfiguracionTrading:
 
         except Exception as e:
             print(f"Error guardando config en {archivo}: {e}")
+
+    def aplicar_preset_configuracion(self, preset: str = "BALANCEADO"):
+        preset = str(preset or "BALANCEADO").upper()
+        presets = {
+            "BALANCEADO": {
+                "UMBRAL_CONFIANZA_COMBINADA": 88.0,
+                "UMBRAL_SEÑAL_DESTACADA": 82.0,
+                "UMBRAL_SEÑAL_CONFIRMADA": 90.0,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": 84.0,
+                "UMBRAL_IA_DIRECCION": 50.0,
+                "UMBRAL_TECNICO_DIRECCION": 48.0,
+                "FILTRO_WM_HABILITADO": False,
+                "MAX_TRADES_POR_HORA": 6,
+                "MAX_TRADES_POR_DIA": 30,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": 120,
+                "COOLDOWN_POST_LOSS_SEC": 120,
+                "MAX_OPERACIONES_SIMULTANEAS": 1,
+                "INTERES_COMPUESTO_ACTIVO": True,
+                "PORCENTAJE_INVERSION": 0.03
+            },
+            "AGRESIVO": {
+                "UMBRAL_CONFIANZA_COMBINADA": 86.0,
+                "UMBRAL_SEÑAL_DESTACADA": 80.0,
+                "UMBRAL_SEÑAL_CONFIRMADA": 88.0,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": 82.0,
+                "UMBRAL_IA_DIRECCION": 48.0,
+                "UMBRAL_TECNICO_DIRECCION": 46.0,
+                "FILTRO_WM_HABILITADO": False,
+                "MAX_TRADES_POR_HORA": 8,
+                "MAX_TRADES_POR_DIA": 40,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": 90,
+                "COOLDOWN_POST_LOSS_SEC": 90,
+                "MAX_OPERACIONES_SIMULTANEAS": 1,
+                "INTERES_COMPUESTO_ACTIVO": True,
+                "PORCENTAJE_INVERSION": 0.03
+            }
+        }
+        if preset not in presets:
+            preset = "BALANCEADO"
+        self.PERFIL_CONFIG_PRESET = preset
+        for k, v in presets[preset].items():
+            try:
+                setattr(self, k, v)
+            except Exception:
+                pass
 
     def cambiar_perfil(self, nuevo_perfil: str):
         if nuevo_perfil in ["REGULAR", "OTC"]:
@@ -10581,6 +10629,7 @@ class IQOptionBridge:
 
         # 6. Guardar si hubo cambios
         if cambios or set(pares_validos) != set(pares_actuales):
+            self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
             self.config.guardar_configuracion()
             logger.info(
                 f"💾 Configuración guardada y sincronizada: {len(pares_validos)} pares activos.")
@@ -18028,6 +18077,18 @@ class ConfiguracionDialog(QDialog):
             "Umbral Señal Confirmada:",
             self.umbral_confirmada)
 
+        self.combo_preset = QComboBox()
+        self.combo_preset.addItems(["BALANCEADO", "AGRESIVO"])
+        self.combo_preset.setCurrentText(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
+        btn_aplicar_preset = QPushButton("Aplicar preset")
+        btn_aplicar_preset.clicked.connect(self._aplicar_preset_en_dialogo)
+        fila_preset = QWidget()
+        fila_preset_layout = QHBoxLayout(fila_preset)
+        fila_preset_layout.setContentsMargins(0, 0, 0, 0)
+        fila_preset_layout.addWidget(self.combo_preset)
+        fila_preset_layout.addWidget(btn_aplicar_preset)
+        layout_senales.addRow("Perfil de Configuración:", fila_preset)
+
         self.peso_neuronal = QDoubleSpinBox()
         self.peso_neuronal.setRange(0, 1)
         self.peso_neuronal.setSingleStep(0.1)
@@ -18832,9 +18893,27 @@ class ConfiguracionDialog(QDialog):
         except Exception:
             pass
 
+    def _aplicar_preset_en_dialogo(self):
+        try:
+            preset = self.combo_preset.currentText() if hasattr(self, "combo_preset") else "BALANCEADO"
+            self.config.aplicar_preset_configuracion(preset)
+            self.umbral_destacada.setValue(float(self.config.UMBRAL_SEÑAL_DESTACADA))
+            self.umbral_confirmada.setValue(float(self.config.UMBRAL_SEÑAL_CONFIRMADA))
+            self.auto_ejecutar_min_confianza.setValue(float(self.config.AUTO_EJECUTAR_MIN_CONFIANZA))
+            self.max_trades_hora.setValue(int(self.config.MAX_TRADES_POR_HORA))
+            self.max_trades_dia.setValue(int(self.config.MAX_TRADES_POR_DIA))
+            self.auto_ejecutar_cooldown_par.setValue(int(self.config.AUTO_EJECUTAR_COOLDOWN_PAR_SEG))
+            self.porcentaje_inversion.setValue(float(self.config.PORCENTAJE_INVERSION) * 100.0)
+            self.interes_compuesto_activo.setChecked(bool(self.config.INTERES_COMPUESTO_ACTIVO))
+        except Exception as e:
+            logger.error(f"Error aplicando preset en diálogo: {e}")
+
     def guardar_configuracion(self):
         self.config.UMBRAL_SEÑAL_DESTACADA = self.umbral_destacada.value()
         self.config.UMBRAL_SEÑAL_CONFIRMADA = self.umbral_confirmada.value()
+        if hasattr(self, "combo_preset"):
+            self.config.PERFIL_CONFIG_PRESET = self.combo_preset.currentText()
+        self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
         self.config.PESO_NEURONAL = self.peso_neuronal.value()
         self.config.PESO_TECNICO = self.peso_tecnico.value()
 
@@ -23302,6 +23381,17 @@ class ConfigDialogTk:
         self.vars[config_key] = var
         return var
 
+    def _add_dropdown(self, parent, label, config_key, options, default):
+        frame = tk.Frame(parent, bg=self.color_panel)
+        frame.pack(fill=tk.X, pady=5, padx=10)
+        tk.Label(frame, text=label, **self.style_lbl).pack(side=tk.LEFT)
+        val = str(getattr(self.config, config_key, default))
+        var = tk.StringVar(value=val if val in options else default)
+        combo = ttk.Combobox(frame, textvariable=var, values=options, state="readonly", width=18)
+        combo.pack(side=tk.RIGHT)
+        self.vars[config_key] = var
+        return var
+
     def _add_title(self, parent, text, color=None):
         if color is None:
             color = self.color_accent
@@ -23334,6 +23424,7 @@ class ConfigDialogTk:
             "Umbral Señal Confirmada:",
             "UMBRAL_SEÑAL_CONFIRMADA",
             75.0)
+        self._add_dropdown(frame, "Perfil de Configuración:", "PERFIL_CONFIG_PRESET", ["BALANCEADO", "AGRESIVO"], "BALANCEADO")
         self._add_entry(
             frame,
             "Peso Red Neuronal (0.0-1.0):",
@@ -23675,6 +23766,7 @@ class ConfigDialogTk:
                 else:
                     setattr(self.config, key, str(val))
 
+            self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
             self.config.guardar_configuracion()
 
             # 2. Guardar Credenciales IQ
