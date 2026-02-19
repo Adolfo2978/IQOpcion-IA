@@ -2517,12 +2517,12 @@ class ConfiguracionTrading:
         # ==========================================
         # UMBRALES DE SEÑALES
         # ==========================================
-        self.UMBRAL_SEÑAL_DESTACADA = 85.0
-        self.UMBRAL_SEÑAL_CONFIRMADA = 92.0
-        self.UMBRAL_CONFIANZA_COMBINADA = 90.0
+        self.UMBRAL_SEÑAL_DESTACADA = 82.0
+        self.UMBRAL_SEÑAL_CONFIRMADA = 90.0
+        self.UMBRAL_CONFIANZA_COMBINADA = 88.0
         self.UMBRAL_COMPRA = 55.0
-        self.UMBRAL_IA_DIRECCION = 52.0
-        self.UMBRAL_TECNICO_DIRECCION = 50.0
+        self.UMBRAL_IA_DIRECCION = 50.0
+        self.UMBRAL_TECNICO_DIRECCION = 48.0
 
         # ==========================================
         # TRADING (BASE)
@@ -2563,13 +2563,13 @@ class ConfiguracionTrading:
         self.REACTIVACION_AUTOMATICA = True
         self.STOP_LOSS_DIARIO = 20.0
         self.PAUSA_AL_STOP_LOSS = True
-        self.MAX_TRADES_POR_HORA = 4
-        self.MAX_TRADES_POR_DIA = 25
+        self.MAX_TRADES_POR_HORA = 6
+        self.MAX_TRADES_POR_DIA = 30
         self.AUTO_EJECUTAR_BROKER = False
-        self.AUTO_EJECUTAR_MIN_CONFIANZA = 85.0
+        self.AUTO_EJECUTAR_MIN_CONFIANZA = 84.0
         self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = 30
-        self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 240
-        self.COOLDOWN_POST_LOSS_SEC = 240
+        self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 120
+        self.COOLDOWN_POST_LOSS_SEC = 120
         self.AUTO_EJECUTAR_CONFIRMACIONES = 1
         self.AUTO_EJECUTAR_INTERVALO_VERIFICACION = 5
         self.RIESGO_POR_OPERACION = 0.02
