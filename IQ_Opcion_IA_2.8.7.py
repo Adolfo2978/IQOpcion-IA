@@ -2001,7 +2001,8 @@ class MotorTradingIntegrado:
         # -------------------------
         confianza_final = (ia_fuerza * w_ia) + (tecnico_score * w_tec)
 
-        umbral_combinado_min = max(float(self.umbral_compra), 90.0)
+        umbral_prod_cfg = float(getattr(self.config, "UMBRAL_CONFIANZA_COMBINADA", 90.0) or 90.0)
+        umbral_combinado_min = max(float(self.umbral_compra), umbral_prod_cfg)
         if confianza_final < umbral_combinado_min:
             return {
                 "accion": "WAIT",
@@ -2051,7 +2052,7 @@ class MotorTradingIntegrado:
         if accion_5m in ("CALL", "PUT") and accion_5m == accion_1m == accion_15m:
             confianza_5m = float(res_5m.get("confianza", 0) or 0)
             umbral_confluencia = max(
-                float(getattr(self.config, "UMBRAL_SEÑAL_CONFIRMADA", 92.0) or 92.0),
+                float(getattr(self.config, "UMBRAL_CONFIANZA_COMBINADA", 90.0) or 90.0),
                 90.0
             )
             if confianza_5m < umbral_confluencia:
@@ -2518,6 +2519,7 @@ class ConfiguracionTrading:
         # ==========================================
         self.UMBRAL_SEÑAL_DESTACADA = 85.0
         self.UMBRAL_SEÑAL_CONFIRMADA = 92.0
+        self.UMBRAL_CONFIANZA_COMBINADA = 90.0
         self.UMBRAL_COMPRA = 55.0
         self.UMBRAL_IA_DIRECCION = 52.0
         self.UMBRAL_TECNICO_DIRECCION = 50.0
@@ -2835,6 +2837,8 @@ class ConfiguracionTrading:
                     try:
                         self.UMBRAL_SEÑAL_CONFIRMADA = float(
                             data.get("UMBRAL_SEÑAL_CONFIRMADA", self.UMBRAL_SEÑAL_CONFIRMADA))
+                        self.UMBRAL_CONFIANZA_COMBINADA = float(
+                            data.get("UMBRAL_CONFIANZA_COMBINADA", getattr(self, "UMBRAL_CONFIANZA_COMBINADA", 90.0)))
                     except Exception:
                         self.UMBRAL_SEÑAL_CONFIRMADA = float(
                             getattr(self, "UMBRAL_SEÑAL_CONFIRMADA", 75.0))
@@ -3027,6 +3031,7 @@ class ConfiguracionTrading:
                 "LOTE_SIZE_ACTUAL": self.LOTE_SIZE_ACTUAL,
                 "LOTE_SIZE_INICIAL": self.LOTE_SIZE_INICIAL,
                 "INTERES_COMPUESTO_ACTIVO": self.INTERES_COMPUESTO_ACTIVO,
+                "UMBRAL_CONFIANZA_COMBINADA": self.UMBRAL_CONFIANZA_COMBINADA,
                 "MAX_OPERACIONES_POR_SESION": self.MAX_OPERACIONES_POR_SESION,
                 "DIAS_HISTORICOS": self.DIAS_HISTORICOS,
                 "DIAS_HISTORICOS_COLDSTART": self.DIAS_HISTORICOS_COLDSTART,
@@ -6402,7 +6407,7 @@ class EstrategiaMultiTimeframe:
             tecnico_pct = max(score_tecnico_call_norm, score_tecnico_put_norm)
             # Reglas de producción: dirección alineada + confianza combinada mínima 90%
             umbral_combinado_min = max(
-                float(getattr(self.config, 'UMBRAL_SEÑAL_CONFIRMADA', 92.0) or 92.0),
+                float(getattr(self.config, 'UMBRAL_CONFIANZA_COMBINADA', 90.0) or 90.0),
                 90.0
             )
             alineacion_direccion = str(señal).upper() == str(alineacion_tf.get('direccion', '')).upper()
@@ -7957,7 +7962,7 @@ class SeguimientoSenales:
                 if getattr(self, 'notificaciones', None) and getattr(self.notificaciones, 'telegram_notifier', None):
                     telegram = self.notificaciones.telegram_notifier
                 else:
-                    telegram = TelegramNotifier(self.config, self.iq_bridge)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self.iq_bridge)
                 telegram.enviar_resultado(
                     par,
                     senal.get('direccion', ''),
@@ -12944,7 +12949,7 @@ class IQOptionBridge:
             # Enviar resultado a Telegram
             if self.config.TELEGRAM_HABILITADO:
                 try:
-                    telegram = TelegramNotifier(self.config, self)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self)
                     telegram.enviar_resultado(
                         operacion.get('simbolo', ''),
                         operacion.get('direccion', ''),
@@ -14357,7 +14362,7 @@ class TradingManager:
             # Notificar por Telegram si está habilitado
             if self.config.TELEGRAM_HABILITADO:
                 try:
-                    telegram = TelegramNotifier(self.config, self.iq_bridge)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self.iq_bridge)
                     telegram.enviar_resultado(
                         simbolo,
                         direccion,
@@ -14475,7 +14480,7 @@ class TradingManager:
                 # Enviar notificación de señal destacada a Telegram
                 if self.config.TELEGRAM_HABILITADO:
                     try:
-                        telegram = TelegramNotifier(
+                        telegram = obtener_telegram_notifier_compartido(
                             self.config, self.iq_bridge)
                         umbral_confirmada = float(
                             getattr(
@@ -16232,6 +16237,21 @@ class TelegramNotifier:
 # ========== SISTEMA DE NOTIFICACIONES ORQUESTADO ==========
 # CAPITULO 27:
 # ==================================================
+
+
+def obtener_telegram_notifier_compartido(config, iq_bridge=None):
+    """Retorna/crea un TelegramNotifier compartido para mantener estado de secuencia."""
+    try:
+        if iq_bridge is not None:
+            existente = getattr(iq_bridge, 'telegram_notifier', None)
+            if existente is not None:
+                return existente
+        notifier = TelegramNotifier(config, iq_bridge)
+        if iq_bridge is not None:
+            setattr(iq_bridge, 'telegram_notifier', notifier)
+        return notifier
+    except Exception:
+        return TelegramNotifier(config, iq_bridge)
 
 
 class SistemaNotificaciones:
