@@ -11374,21 +11374,38 @@ class IQOptionBridge:
                     "ERROR DE RED/DNS - Verifique conexion a internet")
 
     def _cargar_credenciales(self) -> Tuple[Optional[str], Optional[str]]:
-        """Carga las credenciales de IQ Option desde variables de entorno o archivo."""
+        """Carga credenciales y sincroniza tipo de cuenta (env o archivo)."""
+
+        def _normalizar_tipo_cuenta(valor: Optional[str]) -> str:
+            tipo = str(valor or 'PRACTICE').strip().upper()
+            if tipo not in ('PRACTICE', 'REAL'):
+                logger.warning(f"tipo_cuenta inválido: {tipo}. Usando PRACTICE")
+                return 'PRACTICE'
+            return tipo
+
         # PRIORIDAD 1: Variables de entorno (más seguro)
         email = os.environ.get('IQ_OPTION_EMAIL')
         password = os.environ.get('IQ_OPTION_PASSWORD')
+        env_tipo = os.environ.get('IQ_OPTION_ACCOUNT_TYPE')
         if email and password:
+            tipo_cuenta = _normalizar_tipo_cuenta(env_tipo or self.config.TIPO_CUENTA)
+            self.tipo_cuenta_actual = tipo_cuenta
+            self.config.TIPO_CUENTA = tipo_cuenta
             logger.info("Credenciales cargadas desde variables de entorno")
             return email, password
 
         # PRIORIDAD 2: Archivo de credenciales
         try:
             if os.path.exists(self.config.RUTA_CREDENCIALES_IQ):
-                with open(self.config.RUTA_CREDENCIALES_IQ, 'r') as f:
-                    creds = json.load(f)
-                email = creds.get('email')
-                password = creds.get('password')
+                with open(self.config.RUTA_CREDENCIALES_IQ, 'r', encoding='utf-8') as f:
+                    creds = json.load(f) or {}
+                email = str(creds.get('email') or '').strip()
+                password = str(creds.get('password') or '').strip()
+                tipo_cuenta = _normalizar_tipo_cuenta(
+                    creds.get('tipo_cuenta', self.config.TIPO_CUENTA)
+                )
+                self.tipo_cuenta_actual = tipo_cuenta
+                self.config.TIPO_CUENTA = tipo_cuenta
                 if email and password:
                     logger.info("Credenciales cargadas desde archivo")
                     return email, password
@@ -11397,7 +11414,8 @@ class IQOptionBridge:
 
         # Sin credenciales disponibles
         logger.error(
-            "No se encontraron credenciales. Configure IQ_OPTION_EMAIL y IQ_OPTION_PASSWORD")
+            "No se encontraron credenciales. Configure IQ_OPTION_EMAIL y IQ_OPTION_PASSWORD"
+        )
         return None, None
 
     def depurar_conexion(self):
@@ -20704,22 +20722,27 @@ if GUI_AVAILABLE:
             return False
 
         def _cargar_credenciales_completas(self) -> Tuple[str, str, str]:
-            """Carga las credenciales completas incluyendo el tipo de cuenta"""
+            """Carga credenciales completas y normaliza el tipo de cuenta."""
             try:
                 if os.path.exists(self.config.RUTA_CREDENCIALES_IQ):
-                    with open(self.config.RUTA_CREDENCIALES_IQ, 'r') as f:
-                        creds = json.load(f)
+                    with open(self.config.RUTA_CREDENCIALES_IQ, 'r', encoding='utf-8') as f:
+                        creds = json.load(f) or {}
+                    tipo_cuenta = str(creds.get('tipo_cuenta', 'PRACTICE')).strip().upper()
+                    if tipo_cuenta not in ('PRACTICE', 'REAL'):
+                        logger.warning(
+                            f"tipo_cuenta inválido en {self.config.RUTA_CREDENCIALES_IQ}: {tipo_cuenta}. Usando PRACTICE"
+                        )
+                        tipo_cuenta = 'PRACTICE'
                     return (
-                        creds.get('email', 'aguirreadolfo_125@hotmail.com'),
-                        creds.get('password', 'Carmen29@'),
-                        creds.get('tipo_cuenta', 'PRACTICE')
+                        str(creds.get('email') or '').strip(),
+                        str(creds.get('password') or '').strip(),
+                        tipo_cuenta
                     )
             except Exception as e:
                 logger.error(f"Error cargando credenciales: {e}")
 
-            # Credenciales por defecto si no se encuentran en el archivo
-            logger.info("Usando credenciales por defecto")
-            return "aguirreadolfo_125@hotmail.com", "CarmenA29@/", "PRACTICE"
+            logger.info("No se encontraron credenciales de IQ Option")
+            return "", "", "PRACTICE"
 
         def toggle_escaneo(self):
             """Activa o desactiva el escaneo del mercado"""
