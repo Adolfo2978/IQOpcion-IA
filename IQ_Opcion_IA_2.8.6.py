@@ -171,8 +171,7 @@ class LogHandlerGUI(logging.Handler):
 # Mostrar modo de ejecución
 if HEADLESS_MODE:
     logger.info(
-        f"=== MODO CONSOLA (Headless) === Plataforma: {
-            platform.system()}, Replit: {IS_REPLIT}")
+        f"=== MODO CONSOLA (Headless) === Plataforma: {platform.system()}, Replit: {IS_REPLIT}")
 # Handler personalizado para enviar logs a la GUI
 
 
