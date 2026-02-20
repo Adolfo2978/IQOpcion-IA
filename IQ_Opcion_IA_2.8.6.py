@@ -9056,6 +9056,22 @@ class PerformanceMonitor:
                 logger.info(
                     f"PERF connected={b.connected} circuit_open={circuit} q={qsize} last_event_age={age:.1f}s cache={cache_mb:.1f}MB ops={ops_act} timeouts={timeouts} get_candles_p95={p95_ms:.1f}ms mem_cur={mem_cur_mb:.1f}MB mem_peak={mem_peak_mb:.1f}MB"
                 )
+
+                # Detectar desconexión silenciosa del websocket aunque `connected` siga en True
+                ws_ok = True
+                try:
+                    if b.connected and b.api and hasattr(b.api, "check_connect"):
+                        ws_ok = bool(b.api.check_connect())
+                except Exception:
+                    ws_ok = False
+                if b.connected and not ws_ok:
+                    logger.warning("WS_DISCONNECT_DETECT check_connect=False; forzando recuperación")
+                    b.connected = False
+                    try:
+                        b._recover_from_freeze(max(age, self.freeze_sec + 1), force=True)
+                    except Exception:
+                        pass
+
                 if age > self.freeze_sec and b.connected:
                     logger.warning(f"FREEZE_DETECT age={age:.1f}s q={qsize} connected={b.connected}")
                     try:
@@ -9154,9 +9170,9 @@ class IQOptionBridge:
         self._last_get_candles_ms = deque(maxlen=200)
         self._last_freeze_recovery_ts = 0.0
         self._freeze_recovery_cooldown_sec = float(
-            getattr(config, "FREEZE_RECOVERY_COOLDOWN_SEC", 300) or 300)
+            getattr(config, "FREEZE_RECOVERY_COOLDOWN_SEC", 60) or 60)
         self._freeze_reconnect_sec = float(
-            getattr(config, "FREEZE_RECONNECT_SEC", 300) or 300)
+            getattr(config, "FREEZE_RECONNECT_SEC", 120) or 120)
 
         # NUEVO: Historial de trades para rate limit (max 4/hora)
         self._trades_timestamps = []
@@ -9903,10 +9919,10 @@ class IQOptionBridge:
             target=self._loop_publicador_velas, daemon=True)
         self._candles_publisher_thread.start()
 
-    def _recover_from_freeze(self, age: float):
+    def _recover_from_freeze(self, age: float, force: bool = False):
         try:
             now = time.time()
-            if now - self._last_freeze_recovery_ts < self._freeze_recovery_cooldown_sec:
+            if (not force) and (now - self._last_freeze_recovery_ts < self._freeze_recovery_cooldown_sec):
                 return
             self._last_freeze_recovery_ts = now
             try:
@@ -9927,7 +9943,7 @@ class IQOptionBridge:
                 self._resuscribir_streams_velas()
             except Exception:
                 pass
-            if age > self._freeze_reconnect_sec and self.connected:
+            if force or (age > self._freeze_reconnect_sec) or (not self.connected):
                 try:
                     self._reconectar_websocket()
                 except Exception:
