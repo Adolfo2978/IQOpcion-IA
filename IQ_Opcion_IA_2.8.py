@@ -91,6 +91,9 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(
     __file__)) if "__file__" in globals() else os.getcwd()
 DATOS_DIR = os.path.join(BASE_DIR, "Datos")
+IQ_CREDS_PATH = os.path.join(DATOS_DIR, "iq_creds.json")
+TELEGRAM_CREDS_PATH = os.path.join(DATOS_DIR, "telegram_creds.json")
+CONFIG_PATH = os.path.join(DATOS_DIR, "IQ_Option 2.8.6.4_config.json")
 
 
 def datos_rel(filename: str) -> str:
@@ -117,7 +120,7 @@ def migrar_archivos_datos() -> None:
             if not os.path.isfile(ruta):
                 continue
             low = nombre.lower()
-            if not (low.endswith(".pkl") or low.endswith(".pth")):
+            if not (low.endswith(".pkl") or low.endswith(".pth") or low.endswith(".json") or low.endswith(".log") or low.endswith(".txt")):
                 continue
             destino = os.path.join(DATOS_DIR, nombre)
             if os.path.abspath(ruta) == os.path.abspath(destino):
@@ -158,8 +161,51 @@ except Exception:
     pass
 
 
+def _xor_crypt(data: bytes, key: bytes) -> bytes:
+    if not key:
+        return data
+    out = bytearray(len(data))
+    klen = len(key)
+    for i, b in enumerate(data):
+        out[i] = b ^ key[i % klen]
+    return bytes(out)
+
+
+def _derive_profile_key(context: str) -> bytes:
+    seed = "|".join([
+        str(os.environ.get("IQ_PROFILE_ENC_KEY") or ""),
+        str(context or ""),
+        str(platform.node() or ""),
+        str(os.environ.get("USERNAME") or os.environ.get("USER") or "")
+    ])
+    return hashlib.sha256(seed.encode("utf-8", errors="ignore")).digest()
+
+
+def _encrypt_secret(value: str, context: str) -> str:
+    raw = str(value or "").encode("utf-8")
+    if not raw:
+        return ""
+    key = _derive_profile_key(context)
+    enc = _xor_crypt(raw, key)
+    return "enc::" + base64.urlsafe_b64encode(enc).decode("ascii")
+
+
+def _decrypt_secret(value: str, context: str) -> str:
+    txt = str(value or "")
+    if not txt.startswith("enc::"):
+        return txt
+    try:
+        payload = txt.split("enc::", 1)[1]
+        enc = base64.urlsafe_b64decode(payload.encode("ascii"))
+        key = _derive_profile_key(context)
+        dec = _xor_crypt(enc, key)
+        return dec.decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
 def _guardar_iq_creds(email: str = "", password: str = "",
-                      tipo_cuenta: str = "PRACTICE", ruta: str = "iq_creds.json") -> bool:
+                      tipo_cuenta: str = "PRACTICE", ruta: str = IQ_CREDS_PATH) -> bool:
     """Guarda credenciales IQ sin borrar datos existentes por campos vacíos."""
     tipo = str(tipo_cuenta or "PRACTICE").strip().upper()
     if tipo not in ("PRACTICE", "REAL"):
@@ -178,8 +224,14 @@ def _guardar_iq_creds(email: str = "", password: str = "",
     except Exception:
         existentes = {}
 
-    email_final = email_nuevo or str(existentes.get("email") or "").strip()
-    password_final = password_nuevo or str(existentes.get("password") or "").strip()
+    email_existente = str(existentes.get("email") or "").strip()
+    pass_existente = _decrypt_secret(
+        str(existentes.get("password") or "").strip(),
+        email_existente
+    )
+
+    email_final = email_nuevo or email_existente
+    password_final = password_nuevo or pass_existente
 
     # Si no hay credenciales válidas, no sobrescribir archivo existente con vacíos
     if not email_final or not password_final:
@@ -187,7 +239,7 @@ def _guardar_iq_creds(email: str = "", password: str = "",
 
     payload = {
         "email": email_final,
-        "password": password_final,
+        "password": _encrypt_secret(password_final, email_final),
         "tipo_cuenta": tipo
     }
     with open(ruta, "w", encoding="utf-8") as f:
@@ -2494,7 +2546,7 @@ class ConfiguracionTrading:
         # CUENTA
         # ==========================================
         self.TIPO_CUENTA = "PRACTICE"
-        self.RUTA_CREDENCIALES_IQ = "iq_creds.json"
+        self.RUTA_CREDENCIALES_IQ = IQ_CREDS_PATH
 
         # ==========================================
         # IA ENGINE
@@ -2784,7 +2836,7 @@ class ConfiguracionTrading:
     # ==================================================
 
     def cargar_configuracion(self):
-        archivo = "IQ_Option 2.8.6.4_config.json"
+        archivo = CONFIG_PATH
         if os.path.exists(archivo):
             try:
                 with open(archivo, "r", encoding="utf-8") as f:
@@ -3008,7 +3060,7 @@ class ConfiguracionTrading:
                 print(f"Error cargando config desde {archivo}: {e}")
 
     def guardar_configuracion(self):
-        archivo = "IQ_Option 2.8.6.4_config.json"
+        archivo = CONFIG_PATH
         try:
             # Cargar configuración existente para preservar otros campos
             data = {}
@@ -11457,7 +11509,7 @@ class IQOptionBridge:
                 with open(self.config.RUTA_CREDENCIALES_IQ, 'r', encoding='utf-8') as f:
                     creds = json.load(f) or {}
                 email = str(creds.get('email') or '').strip()
-                password = str(creds.get('password') or '').strip()
+                password = _decrypt_secret(str(creds.get('password') or '').strip(), str(creds.get('email') or '').strip())
                 tipo_cuenta = _normalizar_tipo_cuenta(
                     creds.get('tipo_cuenta', self.config.TIPO_CUENTA)
                 )
@@ -15769,14 +15821,14 @@ class TelegramNotifier:
         try:
             if self.bot_token and self.chat_id:
                 return
-            ruta = "telegram_creds.json"
+            ruta = TELEGRAM_CREDS_PATH
             if not os.path.exists(ruta):
                 return
             with open(ruta, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 return
-            token = str(data.get("bot_token") or "").strip()
+            token = _decrypt_secret(str(data.get("bot_token") or "").strip(), str(data.get("chat_id") or "").strip())
             chat = str(data.get("chat_id") or "").strip()
             if token and not self.bot_token:
                 self.bot_token = token
@@ -15832,12 +15884,12 @@ class TelegramNotifier:
         """Guarda las credenciales de Telegram en un archivo JSON separado"""
         try:
             credenciales = {
-                'bot_token': self.config.TELEGRAM_BOT_TOKEN,
+                'bot_token': _encrypt_secret(self.config.TELEGRAM_BOT_TOKEN, self.config.TELEGRAM_CHAT_ID),
                 'chat_id': self.config.TELEGRAM_CHAT_ID,
                 'habilitado': self.config.TELEGRAM_HABILITADO,
                 'zona_horaria': getattr(self.config, 'TELEGRAM_ZONA_HORARIA', 'America/Bogota')
             }
-            with open('telegram_creds.json', 'w') as f:
+            with open(TELEGRAM_CREDS_PATH, 'w', encoding='utf-8') as f:
                 json.dump(credenciales, f, indent=4)
             logger.info("Credenciales de Telegram guardadas correctamente")
         except Exception as e:
@@ -16425,7 +16477,7 @@ class SistemaNotificaciones:
             logger.info("Notificador de Telegram inicializado")
             return
 
-        if habilitado or os.path.exists("telegram_creds.json"):
+        if habilitado or os.path.exists(TELEGRAM_CREDS_PATH):
             notifier = TelegramNotifier(self.config, self.iq_bridge)
             if notifier.bot_token and notifier.chat_id and getattr(
                     self.config, 'TELEGRAM_HABILITADO', False):
@@ -18926,8 +18978,8 @@ class ConfiguracionDialog(QDialog):
 
         creds = {}
         try:
-            if os.path.exists('iq_creds.json'):
-                with open('iq_creds.json', 'r') as f:
+            if os.path.exists(IQ_CREDS_PATH):
+                with open(IQ_CREDS_PATH, 'r', encoding='utf-8') as f:
                     creds = json.load(f) or {}
         except Exception:
             creds = {}
@@ -18940,7 +18992,7 @@ class ConfiguracionDialog(QDialog):
         self.iq_password = QLineEdit()
         self.iq_password.setEchoMode(QLineEdit.Password)
         self.iq_password.setPlaceholderText("Tu contraseña")
-        self.iq_password.setText(creds.get('password', ''))
+        self.iq_password.setText(_decrypt_secret(creds.get('password', ''), creds.get('email', '')))
         layout_iq_creds.addRow("Password:", self.iq_password)
 
         # Tipo de cuenta
@@ -20787,7 +20839,7 @@ if GUI_AVAILABLE:
                         tipo_cuenta = 'PRACTICE'
                     return (
                         str(creds.get('email') or '').strip(),
-                        str(creds.get('password') or '').strip(),
+                        _decrypt_secret(str(creds.get('password') or '').strip(), str(creds.get('email') or '').strip()),
                         tipo_cuenta
                     )
             except Exception as e:
