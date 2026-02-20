@@ -30,6 +30,8 @@ import random
 import time
 import json
 import logging
+import base64
+import hashlib
 import pickle
 import threading
 import platform
