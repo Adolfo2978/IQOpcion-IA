@@ -158,6 +158,43 @@ except Exception:
     pass
 
 
+def _guardar_iq_creds(email: str = "", password: str = "",
+                      tipo_cuenta: str = "PRACTICE", ruta: str = "iq_creds.json") -> bool:
+    """Guarda credenciales IQ sin borrar datos existentes por campos vacíos."""
+    tipo = str(tipo_cuenta or "PRACTICE").strip().upper()
+    if tipo not in ("PRACTICE", "REAL"):
+        tipo = "PRACTICE"
+
+    email_nuevo = str(email or "").strip()
+    password_nuevo = str(password or "").strip()
+
+    existentes = {}
+    try:
+        if os.path.exists(ruta):
+            with open(ruta, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+                if isinstance(data, dict):
+                    existentes = data
+    except Exception:
+        existentes = {}
+
+    email_final = email_nuevo or str(existentes.get("email") or "").strip()
+    password_final = password_nuevo or str(existentes.get("password") or "").strip()
+
+    # Si no hay credenciales válidas, no sobrescribir archivo existente con vacíos
+    if not email_final or not password_final:
+        return False
+
+    payload = {
+        "email": email_final,
+        "password": password_final,
+        "tipo_cuenta": tipo
+    }
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+    return True
+
+
 class LogHandlerGUI(logging.Handler):
     def __init__(self, consola):
         super().__init__()
@@ -18077,15 +18114,14 @@ class CredencialesIQDialog(QDialog):
         # Determinar tipo de cuenta
         tipo_cuenta = "PRACTICE" if self.tipo_practica.isChecked() else "REAL"
 
-        credenciales = {
-            'email': email,
-            'password': password,
-            'tipo_cuenta': tipo_cuenta
-        }
-
         try:
-            with open('iq_creds.json', 'w') as f:
-                json.dump(credenciales, f, indent=4)
+            if not _guardar_iq_creds(email, password, tipo_cuenta):
+                QMessageBox.warning(
+                    self,
+                    "Advertencia",
+                    "No se guardaron credenciales porque email o contraseña están vacíos"
+                )
+                return
 
             QMessageBox.information(
                 self, "Éxito", "Credenciales guardadas correctamente")
@@ -19066,16 +19102,12 @@ class ConfiguracionDialog(QDialog):
             iq_password = self.iq_password.text().strip()
             iq_tipo_cuenta = "REAL" if self.iq_tipo_real.isChecked() else "PRACTICE"
 
-            if iq_email and iq_password:
-                iq_credenciales = {
-                    'email': iq_email,
-                    'password': iq_password,
-                    'tipo_cuenta': iq_tipo_cuenta
-                }
-                with open('iq_creds.json', 'w') as f:
-                    json.dump(iq_credenciales, f, indent=4)
+            if _guardar_iq_creds(iq_email, iq_password, iq_tipo_cuenta):
                 logger.info(
                     "Credenciales de IQ Option guardadas correctamente")
+            else:
+                logger.info(
+                    "Credenciales de IQ Option no modificadas (campos vacíos)")
         except Exception as e:
             logger.error(f"Error guardando credenciales IQ Option: {e}")
 
@@ -23897,16 +23929,16 @@ class ConfigDialogTk:
             self.config.guardar_configuracion()
 
             # 2. Guardar Credenciales IQ
-            iq_creds = {
-                "email": self.var_iq_email.get(),
-                "password": self.var_iq_pass.get(),
-                "tipo_cuenta": self.var_iq_tipo.get()
-            }
-            with open('iq_creds.json', 'w') as f:
-                json.dump(iq_creds, f, indent=4)
+            iq_email = self.var_iq_email.get()
+            iq_password = self.var_iq_pass.get()
+            iq_tipo = self.var_iq_tipo.get()
+            _guardar_iq_creds(iq_email, iq_password, iq_tipo)
 
             # Actualizar config en memoria también
-            self.config.TIPO_CUENTA = iq_creds["tipo_cuenta"]
+            tipo_normalizado = str(iq_tipo or "PRACTICE").strip().upper()
+            if tipo_normalizado not in ("PRACTICE", "REAL"):
+                tipo_normalizado = "PRACTICE"
+            self.config.TIPO_CUENTA = tipo_normalizado
 
             logger.info("Configuración completa actualizada desde Consola")
             messagebox.showinfo(
