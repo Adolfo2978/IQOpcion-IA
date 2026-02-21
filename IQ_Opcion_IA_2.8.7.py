@@ -72,7 +72,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 # Configuración de logging - Archivo + Consola en modo headless
 _log_handlers = [
-    logging.FileHandler('IQ_Option 2.8.6_pro.log', encoding='utf-8'),
+    logging.FileHandler('IQ_Option 2.8.7_pro.log', encoding='utf-8'),
 
 ]
 if HEADLESS_MODE:
@@ -2001,7 +2001,8 @@ class MotorTradingIntegrado:
         # -------------------------
         confianza_final = (ia_fuerza * w_ia) + (tecnico_score * w_tec)
 
-        umbral_combinado_min = max(float(self.umbral_compra), 90.0)
+        umbral_prod_cfg = float(getattr(self.config, "UMBRAL_CONFIANZA_COMBINADA", 90.0) or 90.0)
+        umbral_combinado_min = max(float(self.umbral_compra), umbral_prod_cfg)
         if confianza_final < umbral_combinado_min:
             return {
                 "accion": "WAIT",
@@ -2051,7 +2052,7 @@ class MotorTradingIntegrado:
         if accion_5m in ("CALL", "PUT") and accion_5m == accion_1m == accion_15m:
             confianza_5m = float(res_5m.get("confianza", 0) or 0)
             umbral_confluencia = max(
-                float(getattr(self.config, "UMBRAL_SEÑAL_CONFIRMADA", 92.0) or 92.0),
+                float(getattr(self.config, "UMBRAL_CONFIANZA_COMBINADA", 90.0) or 90.0),
                 90.0
             )
             if confianza_5m < umbral_confluencia:
@@ -2516,11 +2517,13 @@ class ConfiguracionTrading:
         # ==========================================
         # UMBRALES DE SEÑALES
         # ==========================================
-        self.UMBRAL_SEÑAL_DESTACADA = 85.0
-        self.UMBRAL_SEÑAL_CONFIRMADA = 92.0
+        self.UMBRAL_SEÑAL_DESTACADA = 82.0
+        self.UMBRAL_SEÑAL_CONFIRMADA = 90.0
+        self.UMBRAL_CONFIANZA_COMBINADA = 88.0
+        self.PERFIL_CONFIG_PRESET = "BALANCEADO"
         self.UMBRAL_COMPRA = 55.0
-        self.UMBRAL_IA_DIRECCION = 52.0
-        self.UMBRAL_TECNICO_DIRECCION = 50.0
+        self.UMBRAL_IA_DIRECCION = 50.0
+        self.UMBRAL_TECNICO_DIRECCION = 48.0
 
         # ==========================================
         # TRADING (BASE)
@@ -2561,13 +2564,13 @@ class ConfiguracionTrading:
         self.REACTIVACION_AUTOMATICA = True
         self.STOP_LOSS_DIARIO = 20.0
         self.PAUSA_AL_STOP_LOSS = True
-        self.MAX_TRADES_POR_HORA = 4
-        self.MAX_TRADES_POR_DIA = 25
+        self.MAX_TRADES_POR_HORA = 6
+        self.MAX_TRADES_POR_DIA = 30
         self.AUTO_EJECUTAR_BROKER = False
-        self.AUTO_EJECUTAR_MIN_CONFIANZA = 85.0
+        self.AUTO_EJECUTAR_MIN_CONFIANZA = 84.0
         self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = 30
-        self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 240
-        self.COOLDOWN_POST_LOSS_SEC = 240
+        self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 120
+        self.COOLDOWN_POST_LOSS_SEC = 120
         self.AUTO_EJECUTAR_CONFIRMACIONES = 1
         self.AUTO_EJECUTAR_INTERVALO_VERIFICACION = 5
         self.RIESGO_POR_OPERACION = 0.02
@@ -2761,7 +2764,7 @@ class ConfiguracionTrading:
     # ==================================================
 
     def cargar_configuracion(self):
-        archivo = "IQ_Option 2.8.6.4_config.json"
+        archivo = "IQ_Option 2.8.7.4_config.json"
         if os.path.exists(archivo):
             try:
                 with open(archivo, "r", encoding="utf-8") as f:
@@ -2835,6 +2838,8 @@ class ConfiguracionTrading:
                     try:
                         self.UMBRAL_SEÑAL_CONFIRMADA = float(
                             data.get("UMBRAL_SEÑAL_CONFIRMADA", self.UMBRAL_SEÑAL_CONFIRMADA))
+                        self.UMBRAL_CONFIANZA_COMBINADA = float(
+                            data.get("UMBRAL_CONFIANZA_COMBINADA", getattr(self, "UMBRAL_CONFIANZA_COMBINADA", 90.0)))
                     except Exception:
                         self.UMBRAL_SEÑAL_CONFIRMADA = float(
                             getattr(self, "UMBRAL_SEÑAL_CONFIRMADA", 75.0))
@@ -2978,6 +2983,7 @@ class ConfiguracionTrading:
                     # Paper Trading mode
                     self.MODO_PAPER_TRADING = data.get(
                         "PAPER_TRADING", self.MODO_PAPER_TRADING)
+                    self.PERFIL_CONFIG_PRESET = str(data.get("PERFIL_CONFIG_PRESET", getattr(self, "PERFIL_CONFIG_PRESET", "BALANCEADO"))).upper()
 
                     logger.info(f"Configuración cargada desde {archivo}")
 
@@ -2985,7 +2991,7 @@ class ConfiguracionTrading:
                 print(f"Error cargando config desde {archivo}: {e}")
 
     def guardar_configuracion(self):
-        archivo = "IQ_Option 2.8.6.4_config.json"
+        archivo = "IQ_Option 2.8.7.4_config.json"
         try:
             # Cargar configuración existente para preservar otros campos
             data = {}
@@ -3027,13 +3033,15 @@ class ConfiguracionTrading:
                 "LOTE_SIZE_ACTUAL": self.LOTE_SIZE_ACTUAL,
                 "LOTE_SIZE_INICIAL": self.LOTE_SIZE_INICIAL,
                 "INTERES_COMPUESTO_ACTIVO": self.INTERES_COMPUESTO_ACTIVO,
+                "UMBRAL_CONFIANZA_COMBINADA": self.UMBRAL_CONFIANZA_COMBINADA,
                 "MAX_OPERACIONES_POR_SESION": self.MAX_OPERACIONES_POR_SESION,
                 "DIAS_HISTORICOS": self.DIAS_HISTORICOS,
                 "DIAS_HISTORICOS_COLDSTART": self.DIAS_HISTORICOS_COLDSTART,
                 "MAX_TRADES_SESION": self.MAX_TRADES_SESION,
                 "TIPO_CUENTA": self.TIPO_CUENTA,
                 "PAPER_TRADING": self.MODO_PAPER_TRADING,
-                "PARES_TRADING": self.PARES_TRADING
+                "PARES_TRADING": self.PARES_TRADING,
+                "PERFIL_CONFIG_PRESET": self.PERFIL_CONFIG_PRESET
             }
 
             data.update(updates)
@@ -3043,6 +3051,51 @@ class ConfiguracionTrading:
 
         except Exception as e:
             print(f"Error guardando config en {archivo}: {e}")
+
+    def aplicar_preset_configuracion(self, preset: str = "BALANCEADO"):
+        preset = str(preset or "BALANCEADO").upper()
+        presets = {
+            "BALANCEADO": {
+                "UMBRAL_CONFIANZA_COMBINADA": 88.0,
+                "UMBRAL_SEÑAL_DESTACADA": 82.0,
+                "UMBRAL_SEÑAL_CONFIRMADA": 90.0,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": 84.0,
+                "UMBRAL_IA_DIRECCION": 50.0,
+                "UMBRAL_TECNICO_DIRECCION": 48.0,
+                "FILTRO_WM_HABILITADO": False,
+                "MAX_TRADES_POR_HORA": 6,
+                "MAX_TRADES_POR_DIA": 30,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": 120,
+                "COOLDOWN_POST_LOSS_SEC": 120,
+                "MAX_OPERACIONES_SIMULTANEAS": 1,
+                "INTERES_COMPUESTO_ACTIVO": True,
+                "PORCENTAJE_INVERSION": 0.03
+            },
+            "AGRESIVO": {
+                "UMBRAL_CONFIANZA_COMBINADA": 86.0,
+                "UMBRAL_SEÑAL_DESTACADA": 80.0,
+                "UMBRAL_SEÑAL_CONFIRMADA": 88.0,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": 82.0,
+                "UMBRAL_IA_DIRECCION": 48.0,
+                "UMBRAL_TECNICO_DIRECCION": 46.0,
+                "FILTRO_WM_HABILITADO": False,
+                "MAX_TRADES_POR_HORA": 8,
+                "MAX_TRADES_POR_DIA": 40,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": 90,
+                "COOLDOWN_POST_LOSS_SEC": 90,
+                "MAX_OPERACIONES_SIMULTANEAS": 1,
+                "INTERES_COMPUESTO_ACTIVO": True,
+                "PORCENTAJE_INVERSION": 0.03
+            }
+        }
+        if preset not in presets:
+            preset = "BALANCEADO"
+        self.PERFIL_CONFIG_PRESET = preset
+        for k, v in presets[preset].items():
+            try:
+                setattr(self, k, v)
+            except Exception:
+                pass
 
     def cambiar_perfil(self, nuevo_perfil: str):
         if nuevo_perfil in ["REGULAR", "OTC"]:
@@ -6402,7 +6455,7 @@ class EstrategiaMultiTimeframe:
             tecnico_pct = max(score_tecnico_call_norm, score_tecnico_put_norm)
             # Reglas de producción: dirección alineada + confianza combinada mínima 90%
             umbral_combinado_min = max(
-                float(getattr(self.config, 'UMBRAL_SEÑAL_CONFIRMADA', 92.0) or 92.0),
+                float(getattr(self.config, 'UMBRAL_CONFIANZA_COMBINADA', 90.0) or 90.0),
                 90.0
             )
             alineacion_direccion = str(señal).upper() == str(alineacion_tf.get('direccion', '')).upper()
@@ -7957,7 +8010,7 @@ class SeguimientoSenales:
                 if getattr(self, 'notificaciones', None) and getattr(self.notificaciones, 'telegram_notifier', None):
                     telegram = self.notificaciones.telegram_notifier
                 else:
-                    telegram = TelegramNotifier(self.config, self.iq_bridge)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self.iq_bridge)
                 telegram.enviar_resultado(
                     par,
                     senal.get('direccion', ''),
@@ -10576,6 +10629,7 @@ class IQOptionBridge:
 
         # 6. Guardar si hubo cambios
         if cambios or set(pares_validos) != set(pares_actuales):
+            self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
             self.config.guardar_configuracion()
             logger.info(
                 f"💾 Configuración guardada y sincronizada: {len(pares_validos)} pares activos.")
@@ -12944,7 +12998,7 @@ class IQOptionBridge:
             # Enviar resultado a Telegram
             if self.config.TELEGRAM_HABILITADO:
                 try:
-                    telegram = TelegramNotifier(self.config, self)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self)
                     telegram.enviar_resultado(
                         operacion.get('simbolo', ''),
                         operacion.get('direccion', ''),
@@ -14357,7 +14411,7 @@ class TradingManager:
             # Notificar por Telegram si está habilitado
             if self.config.TELEGRAM_HABILITADO:
                 try:
-                    telegram = TelegramNotifier(self.config, self.iq_bridge)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self.iq_bridge)
                     telegram.enviar_resultado(
                         simbolo,
                         direccion,
@@ -14475,7 +14529,7 @@ class TradingManager:
                 # Enviar notificación de señal destacada a Telegram
                 if self.config.TELEGRAM_HABILITADO:
                     try:
-                        telegram = TelegramNotifier(
+                        telegram = obtener_telegram_notifier_compartido(
                             self.config, self.iq_bridge)
                         umbral_confirmada = float(
                             getattr(
@@ -16232,6 +16286,21 @@ class TelegramNotifier:
 # ========== SISTEMA DE NOTIFICACIONES ORQUESTADO ==========
 # CAPITULO 27:
 # ==================================================
+
+
+def obtener_telegram_notifier_compartido(config, iq_bridge=None):
+    """Retorna/crea un TelegramNotifier compartido para mantener estado de secuencia."""
+    try:
+        if iq_bridge is not None:
+            existente = getattr(iq_bridge, 'telegram_notifier', None)
+            if existente is not None:
+                return existente
+        notifier = TelegramNotifier(config, iq_bridge)
+        if iq_bridge is not None:
+            setattr(iq_bridge, 'telegram_notifier', notifier)
+        return notifier
+    except Exception:
+        return TelegramNotifier(config, iq_bridge)
 
 
 class SistemaNotificaciones:
@@ -18008,6 +18077,18 @@ class ConfiguracionDialog(QDialog):
             "Umbral Señal Confirmada:",
             self.umbral_confirmada)
 
+        self.combo_preset = QComboBox()
+        self.combo_preset.addItems(["BALANCEADO", "AGRESIVO"])
+        self.combo_preset.setCurrentText(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
+        btn_aplicar_preset = QPushButton("Aplicar preset")
+        btn_aplicar_preset.clicked.connect(self._aplicar_preset_en_dialogo)
+        fila_preset = QWidget()
+        fila_preset_layout = QHBoxLayout(fila_preset)
+        fila_preset_layout.setContentsMargins(0, 0, 0, 0)
+        fila_preset_layout.addWidget(self.combo_preset)
+        fila_preset_layout.addWidget(btn_aplicar_preset)
+        layout_senales.addRow("Perfil de Configuración:", fila_preset)
+
         self.peso_neuronal = QDoubleSpinBox()
         self.peso_neuronal.setRange(0, 1)
         self.peso_neuronal.setSingleStep(0.1)
@@ -18812,9 +18893,27 @@ class ConfiguracionDialog(QDialog):
         except Exception:
             pass
 
+    def _aplicar_preset_en_dialogo(self):
+        try:
+            preset = self.combo_preset.currentText() if hasattr(self, "combo_preset") else "BALANCEADO"
+            self.config.aplicar_preset_configuracion(preset)
+            self.umbral_destacada.setValue(float(self.config.UMBRAL_SEÑAL_DESTACADA))
+            self.umbral_confirmada.setValue(float(self.config.UMBRAL_SEÑAL_CONFIRMADA))
+            self.auto_ejecutar_min_confianza.setValue(float(self.config.AUTO_EJECUTAR_MIN_CONFIANZA))
+            self.max_trades_hora.setValue(int(self.config.MAX_TRADES_POR_HORA))
+            self.max_trades_dia.setValue(int(self.config.MAX_TRADES_POR_DIA))
+            self.auto_ejecutar_cooldown_par.setValue(int(self.config.AUTO_EJECUTAR_COOLDOWN_PAR_SEG))
+            self.porcentaje_inversion.setValue(float(self.config.PORCENTAJE_INVERSION) * 100.0)
+            self.interes_compuesto_activo.setChecked(bool(self.config.INTERES_COMPUESTO_ACTIVO))
+        except Exception as e:
+            logger.error(f"Error aplicando preset en diálogo: {e}")
+
     def guardar_configuracion(self):
         self.config.UMBRAL_SEÑAL_DESTACADA = self.umbral_destacada.value()
         self.config.UMBRAL_SEÑAL_CONFIRMADA = self.umbral_confirmada.value()
+        if hasattr(self, "combo_preset"):
+            self.config.PERFIL_CONFIG_PRESET = self.combo_preset.currentText()
+        self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
         self.config.PESO_NEURONAL = self.peso_neuronal.value()
         self.config.PESO_TECNICO = self.peso_tecnico.value()
 
@@ -19696,7 +19795,7 @@ if GUI_AVAILABLE:
             if not hasattr(self, "consola"):
                 self.consola = ConsolaFlotante(
                     ai_engine=self.api.ai_engine,
-                    log_file="IQ_Option 2.8.6_pro.log"
+                    log_file="IQ_Option 2.8.7_pro.log"
                 )
             # ==================================================
             # 3. DETECCIÓN DE PARES ABIERTOS (REAL)
@@ -19817,7 +19916,7 @@ if GUI_AVAILABLE:
                 self.btn_stop.setEnabled(True)
 
             # === CONSOLA FLOTANTE ===
-            self.consola = ConsolaFlotante("IQ_Option 2.8.6_pro.log")
+            self.consola = ConsolaFlotante("IQ_Option 2.8.7_pro.log")
 
             gui_handler = LogHandlerGUI(self.consola)
             gui_handler.setLevel(logging.INFO)
@@ -22359,7 +22458,7 @@ def mostrar_dashboard_consola(
 def run_headless_mode():
     """Ejecuta el bot en modo sin interfaz gráfica (servidor/terminal)"""
     logger.info("=" * 60)
-    logger.info("IQ_Option 2.8.6 - MODO HEADLESS (Sin GUI)")
+    logger.info("IQ_Option 2.8.7 - MODO HEADLESS (Sin GUI)")
     logger.info("=" * 60)
 
     # Inicializar configuración PRIMERO
@@ -22369,7 +22468,7 @@ def run_headless_mode():
         consola_flotante = None
         try:
             if IS_WINDOWS or os.environ.get("DISPLAY"):
-                log_file = "IQ_Option 2.8.6_pro.log"
+                log_file = "IQ_Option 2.8.7_pro.log"
                 for h in logging.getLogger().handlers:
                     if isinstance(h, logging.FileHandler) and getattr(
                             h, "baseFilename", None):
@@ -23282,6 +23381,17 @@ class ConfigDialogTk:
         self.vars[config_key] = var
         return var
 
+    def _add_dropdown(self, parent, label, config_key, options, default):
+        frame = tk.Frame(parent, bg=self.color_panel)
+        frame.pack(fill=tk.X, pady=5, padx=10)
+        tk.Label(frame, text=label, **self.style_lbl).pack(side=tk.LEFT)
+        val = str(getattr(self.config, config_key, default))
+        var = tk.StringVar(value=val if val in options else default)
+        combo = ttk.Combobox(frame, textvariable=var, values=options, state="readonly", width=18)
+        combo.pack(side=tk.RIGHT)
+        self.vars[config_key] = var
+        return var
+
     def _add_title(self, parent, text, color=None):
         if color is None:
             color = self.color_accent
@@ -23314,6 +23424,7 @@ class ConfigDialogTk:
             "Umbral Señal Confirmada:",
             "UMBRAL_SEÑAL_CONFIRMADA",
             75.0)
+        self._add_dropdown(frame, "Perfil de Configuración:", "PERFIL_CONFIG_PRESET", ["BALANCEADO", "AGRESIVO"], "BALANCEADO")
         self._add_entry(
             frame,
             "Peso Red Neuronal (0.0-1.0):",
@@ -23655,6 +23766,7 @@ class ConfigDialogTk:
                 else:
                     setattr(self.config, key, str(val))
 
+            self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
             self.config.guardar_configuracion()
 
             # 2. Guardar Credenciales IQ
@@ -23682,7 +23794,7 @@ class ConfigDialogTk:
 
 
 class ConsolaFlotante:
-    def __init__(self, ai_engine=None, log_file="IQ_Option 2.8.6_pro.log",
+    def __init__(self, ai_engine=None, log_file="IQ_Option 2.8.7_pro.log",
                  config=None, start_loop=True):
         self.log_file = log_file
         self.ai = ai_engine
