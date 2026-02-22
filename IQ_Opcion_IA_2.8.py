@@ -12831,14 +12831,21 @@ class IQOptionBridge:
                 res_confluencia = self.motor_trading.validar_confluencia_timeframes(
                      df_1m, df_5m, df_15m, expiracion_segundos=300
                 )
-                
-                accion_multi = res_confluencia.get('accion', 'WAIT')
+
+                accion_multi = str(res_confluencia.get('accion', 'WAIT')).upper()
                 if accion_multi in ('CALL', 'PUT'):
                      alineacion_tf['alineado'] = True
                      alineacion_tf['direccion'] = accion_multi
                      alineacion_tf['confianza'] = res_confluencia.get('confianza', 0.0) / 100.0
                      alineacion_tf['tf_1m'] = 'OK'
-                     
+
+            # Requisito estricto: operar solo con alineación 1m/5m/15m
+            if not alineacion_tf['alineado']:
+                return {
+                    'ejecutado': False,
+                    'razon': 'timeframes_no_alineados_1m_5m_15m'
+                }
+
             # Generar prediccion combinada (IA + Market Maker)
             prediccion = self.ensemble_predictor.predecir_con_market_maker(
                 df=df_5m,
@@ -12921,6 +12928,14 @@ class IQOptionBridge:
                     "CALL", "PUT") or direccion_tecnica != ia_dir:
                 return {'ejecutado': False,
                         'razon': 'direccion_no_coincide', 'prediccion': prediccion}
+            if str(alineacion_tf.get('direccion', 'NEUTRAL')).upper() != str(ia_dir).upper():
+                return {'ejecutado': False,
+                        'razon': 'desalineacion_multi_tf_ia_tecnico', 'prediccion': prediccion}
+
+            tendencia_val = float((indicadores or {}).get('tendencia', 0) or 0)
+            if (ia_dir == 'CALL' and tendencia_val < 0) or (ia_dir == 'PUT' and tendencia_val > 0):
+                return {'ejecutado': False,
+                        'razon': 'tendencia_contraria', 'prediccion': prediccion}
             if ia_conf < umbral_ia:
                 return {'ejecutado': False, 'razon': 'ia_bajo_umbral',
                         'prediccion': prediccion}
@@ -12977,9 +12992,12 @@ class IQOptionBridge:
                 f"🚀 Intentando operación en {simbolo}: {direccion_final} ${monto_final}")
 
             check, order_id = False, None
+            expiracion_min = int(getattr(self.config, "TIEMPO_EXPIRACION", 5) or 5)
+            if expiracion_min <= 0:
+                expiracion_min = 5
             try:
                 check, order_id = self.api.buy(
-                    monto_final, simbolo, direccion_final, 1)  # Expiración 1 min
+                    monto_final, simbolo, direccion_final, expiracion_min)
             except Exception as e:
                 logger.error(f"Fallo al ejecutar Binaria: {e}")
 
@@ -12989,7 +13007,7 @@ class IQOptionBridge:
                     "Binaria no disponible o fallida, intentando Digital Spot...")
                 try:
                     check, order_id = self.api.buy_digital_spot(
-                        simbolo, monto_final, direccion_final.lower(), 1)
+                        simbolo, monto_final, direccion_final.lower(), expiracion_min)
                 except Exception as e:
                     logger.error(f"Fallo al ejecutar Digital: {e}")
 
@@ -12998,7 +13016,7 @@ class IQOptionBridge:
                 self._trades_timestamps.append(datetime.now())
 
                 self.abrir_operacion(
-                    order_id, simbolo, direccion_final, monto_final, 1)
+                    order_id, simbolo, direccion_final, monto_final, expiracion_min)
                 logger.info(f"✅ Operación exitosa: ID {order_id}")
 
                 # Guardar resultado (simulado al abrir, se actualizará al
