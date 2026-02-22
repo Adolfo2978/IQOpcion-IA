@@ -2413,6 +2413,7 @@ class ConfiguracionTrading:
         self.USAR_PARES_COMMODITIES = True
         self.USAR_PARES_INDICES = True
         self.USAR_DIGITALES = True
+        self.USAR_BINARIAS = True
 
         # ==========================================
         # DATOS Y VELAS
@@ -9592,6 +9593,12 @@ class IQOptionBridge:
             if not par.endswith("-OTC") and not self.config.USAR_PARES_FOREX:
                 continue
 
+            # Mantener pares solo si el tipo de opción está habilitado
+            usar_binarias = bool(getattr(self.config, "USAR_BINARIAS", True))
+            usar_digitales = bool(getattr(self.config, "USAR_DIGITALES", True))
+            if not (usar_binarias or usar_digitales):
+                continue
+
             pares_filtrados.append(par)
         self._actualizar_cache_operables(pares_filtrados)
         return pares_filtrados
@@ -10638,9 +10645,17 @@ class IQOptionBridge:
         # Helper para verificar si un par está abierto (Binary/Turbo cubren
         # 1m/5m/15m)
         def es_activo_valido(par):
-            for mercado in ("binary", "turbo"):
-                info = open_time_info.get(mercado, {}).get(par)
-                if info and (info.get("open") or info.get("is_open")):
+            usar_binarias = bool(getattr(self.config, "USAR_BINARIAS", True))
+            usar_digitales = bool(getattr(self.config, "USAR_DIGITALES", True))
+
+            if usar_binarias:
+                for mercado in ("binary", "turbo"):
+                    info = open_time_info.get(mercado, {}).get(par)
+                    if info and (info.get("open") or info.get("is_open")):
+                        return True
+            if usar_digitales:
+                info_d = open_time_info.get("digital", {}).get(par)
+                if info_d and (info_d.get("open") or info_d.get("is_open")):
                     return True
             return False
 
@@ -10664,7 +10679,7 @@ class IQOptionBridge:
             candidatos_forex = set()
             candidatos_otc = set()
 
-            for mercado in ("binary", "turbo"):
+            for mercado in ("binary", "turbo", "digital"):
                 for par, info in open_time_info.get(mercado, {}).items():
                     if info and (info.get("open") or info.get("is_open")):
                         if "OTC" in par:
@@ -10784,16 +10799,27 @@ class IQOptionBridge:
             # 3. FUNCIÓN DE VERIFICACIÓN (Turbo & Binary)
             # ---------------------------------------------------------
             def verificar_habilitado(nombre_par: str) -> bool:
-                # Verificar Binary (para 15m)
-                bin_info = open_time_data.get("binary", {}).get(nombre_par)
-                if isinstance(bin_info, dict) and (
-                        bin_info.get("open") or bin_info.get("is_open")):
-                    return True
-                # Verificar Turbo (para 1m/5m)
-                turbo_info = open_time_data.get("turbo", {}).get(nombre_par)
-                if isinstance(turbo_info, dict) and (
-                        turbo_info.get("open") or turbo_info.get("is_open")):
-                    return True
+                usar_binarias = bool(getattr(self.config, "USAR_BINARIAS", True))
+                usar_digitales = bool(getattr(self.config, "USAR_DIGITALES", True))
+
+                # Binary/Turbo cubren 1m/5m/15m para binarias
+                if usar_binarias:
+                    bin_info = open_time_data.get("binary", {}).get(nombre_par)
+                    if isinstance(bin_info, dict) and (
+                            bin_info.get("open") or bin_info.get("is_open")):
+                        return True
+                    turbo_info = open_time_data.get("turbo", {}).get(nombre_par)
+                    if isinstance(turbo_info, dict) and (
+                            turbo_info.get("open") or turbo_info.get("is_open")):
+                        return True
+
+                # Digitales habilitadas
+                if usar_digitales:
+                    dig_info = open_time_data.get("digital", {}).get(nombre_par)
+                    if isinstance(dig_info, dict) and (
+                            dig_info.get("open") or dig_info.get("is_open")):
+                        return True
+
                 return False
 
             # ---------------------------------------------------------
@@ -10802,7 +10828,8 @@ class IQOptionBridge:
             lista_final = []
             keys_api_turbo = list(open_time_data.get("turbo", {}).keys())
             keys_api_binary = list(open_time_data.get("binary", {}).keys())
-            all_api_keys = set(keys_api_turbo + keys_api_binary)
+            keys_api_digital = list(open_time_data.get("digital", {}).keys())
+            all_api_keys = set(keys_api_turbo + keys_api_binary + keys_api_digital)
 
             for par_objetivo in lista_prioridad:
                 par_a_usar = None
@@ -10867,7 +10894,7 @@ class IQOptionBridge:
                 return []
 
             abiertos = set()
-            for mercado in ("binary", "turbo"):
+            for mercado in ("binary", "turbo", "digital"):
                 pares = open_time_info.get(mercado, {})
                 if not isinstance(pares, dict):
                     continue
