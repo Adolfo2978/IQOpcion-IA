@@ -2434,7 +2434,7 @@ class ConfiguracionTrading:
 
         self.USAR_TF_1M = True
         self.USAR_TF_5M = True
-        self.USAR_TF_15M = True
+        self.USAR_TF_15M = False
         self.USAR_TF_30M = False
         self.UMBRAL_ALINEACION_TF = 92
         self.FILTRO_APRENDIZAJE_HABILITADO = True
@@ -2525,9 +2525,9 @@ class ConfiguracionTrading:
         self.UMBRAL_SEÑAL_CONFIRMADA = 90.0
         self.UMBRAL_CONFIANZA_COMBINADA = 88.0
         self.PERFIL_CONFIG_PRESET = "BALANCEADO"
-        self.UMBRAL_COMPRA = 55.0
-        self.UMBRAL_IA_DIRECCION = 50.0
-        self.UMBRAL_TECNICO_DIRECCION = 48.0
+        self.UMBRAL_COMPRA = 85.0
+        self.UMBRAL_IA_DIRECCION = 85.0
+        self.UMBRAL_TECNICO_DIRECCION = 85.0
 
         # ==========================================
         # TRADING (BASE)
@@ -2538,6 +2538,7 @@ class ConfiguracionTrading:
         self.PORCENTAJE_INVERSION = 0.1
         self.MAX_OPERACIONES_SIMULTANEAS = 1
         self.TIEMPO_EXPIRACION = 5
+        self.AUTOAPRENDIZAJE_SOLO_WINS = True
         self.CAPITAL_INICIAL = 10.0
         self.LOTE_SIZE_ACTUAL = 1.0
         self.LOTE_SIZE_INICIAL = 1.0
@@ -7313,7 +7314,9 @@ class PaperTradingEngine:
 
         # 🔥 ENTRENAR IA
         if self.ai_engine:
-            self.ai_engine.learn_from_result(win, direccion)
+            solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True)) if hasattr(self, "config") else True
+            if (not solo_wins) or bool(win):
+                self.ai_engine.learn_from_result(win, direccion)
 
         return {
             'win': win,
@@ -8083,8 +8086,10 @@ class SeguimientoSenales:
             if self.ai_engine:
                 if cumple_filtro_aprendizaje(self.config, senal.get("direccion"),
                                              senal.get("indicadores", {}) or {}):
-                    self.ai_engine.learn_from_result(
-                        is_win, senal.get("direccion"))
+                    solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True))
+                    if (not solo_wins) or bool(is_win):
+                        self.ai_engine.learn_from_result(
+                            is_win, senal.get("direccion"))
         except Exception as e:
             self.logger.error(
                 f"❌ Error enviando feedback a IA: {e}",
@@ -9441,8 +9446,11 @@ class IQOptionBridge:
                                 indicadores = pred.get("indicadores", {}) or {}
                             if cumple_filtro_aprendizaje(
                                     self.config, direccion, indicadores):
-                                self.ai_engine.learn_from_result(
-                                    float(beneficio) > 0, direccion)
+                                is_win = float(beneficio) > 0
+                                solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True))
+                                if (not solo_wins) or is_win:
+                                    self.ai_engine.learn_from_result(
+                                        is_win, direccion)
                     except Exception:
                         pass
                     cerradas += 1
@@ -23983,8 +23991,9 @@ class ConsolaFlotante:
     def _ui_loop(self):
         try:
             self.root = tk.Tk()
-            self.root.title("📊 Consola de Diagnóstico – IQ Option Bot")
-            self.root.geometry("1100x600")
+            self.root.title("IQ Option IA 2.8 | Trading Console Pro")
+            self.root.geometry("1280x760")
+            self.root.minsize(1100, 680)
             self.root.configure(bg="#1e1e1e")
 
             # Configurar estilo oscuro para Treeview
@@ -24002,13 +24011,20 @@ class ConsolaFlotante:
             style.map("Treeview", background=[("selected", "#007acc")])
 
             # Barra superior de herramientas
-            toolbar = tk.Frame(self.root, bg="#333", height=30)
+            toolbar = tk.Frame(self.root, bg="#111827", height=36)
             toolbar.pack(fill=tk.X, side=tk.TOP)
+
+            tk.Label(toolbar, text="IQ Option IA 2.8 • Console Pro", bg="#111827", fg="#E5E7EB", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=10)
 
             btn_config = tk.Button(toolbar, text="⚙️ Configuración Avanzada",
                                    command=lambda: self.abrir_configuracion(),
-                                   bg="#444", fg="white", relief="flat", font=("Arial", 9))
-            btn_config.pack(side=tk.RIGHT, padx=10, pady=2)
+                                   bg="#2563EB", fg="white", relief="flat", font=("Segoe UI", 9, "bold"))
+            btn_config.pack(side=tk.RIGHT, padx=8, pady=4)
+
+            btn_clear = tk.Button(toolbar, text="🧹 Limpiar Log",
+                                  command=lambda: self.tree.delete(*self.tree.get_children()) if self.tree is not None else None,
+                                  bg="#374151", fg="#F9FAFB", relief="flat", font=("Segoe UI", 9))
+            btn_clear.pack(side=tk.RIGHT, padx=4, pady=4)
 
             # Contenedor principal dividido
             paned = tk.PanedWindow(
@@ -24110,11 +24126,16 @@ class ConsolaFlotante:
 
             # Tags de colores para niveles
             self.tree.tag_configure(
-                "INFO", foreground="#00ff00")      # Verde brillante
+                "INFO", foreground="#22C55E")
             self.tree.tag_configure(
-                "WARNING", foreground="#ffaa00")   # Naranja
-            self.tree.tag_configure("ERROR", foreground="#ff4444")     # Rojo
-            self.tree.tag_configure("DEBUG", foreground="#888888")     # Gris
+                "WARNING", foreground="#F59E0B")
+            self.tree.tag_configure("ERROR", foreground="#EF4444")
+            self.tree.tag_configure("DEBUG", foreground="#9CA3AF")
+            self.tree.tag_configure("ROW_ODD", background="#111827")
+            self.tree.tag_configure("ROW_EVEN", background="#0B1220")
+
+            self.status_var = tk.StringVar(value="Estado: En ejecución | Alineación 1m/5m activa")
+            tk.Label(self.root, textvariable=self.status_var, bg="#0B1220", fg="#93C5FD", anchor="w", font=("Segoe UI", 9)).pack(fill=tk.X, side=tk.BOTTOM)
 
             self.root.protocol("WM_DELETE_WINDOW", self.cerrar)
             self._ui_queue.put(
@@ -24147,10 +24168,12 @@ class ConsolaFlotante:
                                     hora, comp, nivel, texto = match.groups()
                                     tag = nivel.upper() if nivel.upper() in (
                                         "INFO", "WARNING", "ERROR", "DEBUG") else "INFO"
+                                    idx = len(self.tree.get_children())
+                                    row_tag = "ROW_EVEN" if idx % 2 == 0 else "ROW_ODD"
                                     self.tree.insert(
                                         "", tk.END, values=(
                                             hora, nivel, comp, texto), tags=(
-                                            tag,))
+                                            row_tag, tag))
                                     if self.max_log_rows:
                                         children = self.tree.get_children()
                                         if len(children) > self.max_log_rows:
@@ -24159,10 +24182,12 @@ class ConsolaFlotante:
                                 else:
                                     # Fallback para mensajes sin formato
                                     ahora = time.strftime("%H:%M:%S")
+                                    idx = len(self.tree.get_children())
+                                    row_tag = "ROW_EVEN" if idx % 2 == 0 else "ROW_ODD"
                                     self.tree.insert(
                                         "", tk.END, values=(
                                             ahora, "INFO", "System", msg), tags=(
-                                            "INFO",))
+                                            row_tag, "INFO"))
                                     if self.max_log_rows:
                                         children = self.tree.get_children()
                                         if len(children) > self.max_log_rows:
