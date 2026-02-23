@@ -40,6 +40,7 @@ import os
 import argparse
 from queue import Queue, Empty
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 # Parsear argumentos de línea de comandos PRIMERO
 _parser = argparse.ArgumentParser(description='IQ Option Trading Bot 2.0')
 _parser.add_argument(
@@ -9080,6 +9081,23 @@ class PerformanceMonitor:
         except Exception:
             return 0.0
 
+    def _safe_check_connect(self, bridge, timeout: float = 2.0) -> bool:
+        result = [False]
+
+        def _check():
+            try:
+                if bridge.api and hasattr(bridge.api, "check_connect"):
+                    result[0] = bool(bridge.api.check_connect())
+            except Exception:
+                result[0] = False
+
+        t = threading.Thread(target=_check, daemon=True)
+        t.start()
+        t.join(timeout)
+        if t.is_alive():
+            return False
+        return bool(result[0])
+
     def _loop(self):
         while not self.stop_event.is_set():
             try:
@@ -9115,7 +9133,7 @@ class PerformanceMonitor:
                 ws_ok = True
                 try:
                     if b.connected and b.api and hasattr(b.api, "check_connect"):
-                        ws_ok = bool(b.api.check_connect())
+                        ws_ok = self._safe_check_connect(b, timeout=2.0)
                 except Exception:
                     ws_ok = False
                 if b.connected and not ws_ok:
@@ -9218,6 +9236,10 @@ class IQOptionBridge:
         self._candles_streams = {}
         self._candles_callbacks = {}
         self._candles_event_queue = Queue(maxsize=5000)
+        self._candles_callback_executor = ThreadPoolExecutor(
+            max_workers=int(getattr(config, "CANDLES_CALLBACK_WORKERS", 4) or 4),
+            thread_name_prefix="candles-cb"
+        )
         self._candles_publisher_stop = threading.Event()
         self._candles_publisher_thread = None
         self._last_event_ts = 0.0
@@ -10091,7 +10113,7 @@ class IQOptionBridge:
 
         for cb in callbacks:
             try:
-                cb(evento)
+                self._candles_callback_executor.submit(cb, evento)
             except Exception:
                 pass
 
@@ -13822,6 +13844,11 @@ class IQOptionBridge:
             except Exception as e:
                 logger.error(f"Error al desconectar de IQ Option: {e}")
             self.connected = False
+        try:
+            if getattr(self, "_candles_callback_executor", None):
+                self._candles_callback_executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
     # Nuevo método en IQOptionBridge
 
     def cargar_pares_gui(self):
