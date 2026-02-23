@@ -1167,6 +1167,123 @@ class IndicatorsPropios:
                 bull_bars = len(c) - p2
         return {'bullish': bull, 'bearish': bear, 'bull_bars': bull_bars, 'bear_bars': bear_bars}
     @staticmethod
+    def RFI_ZONAS(df: pd.DataFrame, impulso_mult_atr: float = 1.2,
+                  zona_atr_mult: float = 0.5, ema_fast: int = 21,
+                  ema_slow: int = 50) -> dict:
+        """Detecta zonas RFI de impulso comprador/vendedor y estado activo."""
+        try:
+            if df is None or len(df) < 60:
+                return {
+                    'direccion': 'NEUTRAL',
+                    'score': 0.0,
+                    'zona_compra_activa': False,
+                    'zona_venta_activa': False,
+                    'zonas': [],
+                    'circulos': []
+                }
+
+            o = df['open'].astype(float)
+            h = df['high'].astype(float)
+            l = df['low'].astype(float)
+            c = df['close'].astype(float)
+            atr = _atr_series(h, l, c, 14).fillna(method='bfill').fillna(0.0)
+            atr_last = float(atr.iloc[-1] or 0.0)
+            if atr_last <= 0:
+                atr_last = float((h.tail(20).max() - l.tail(20).min()) / 20.0)
+
+            cuerpo = (c - o).abs()
+            impulso = cuerpo > (atr * float(max(0.5, impulso_mult_atr)))
+
+            zonas = []
+            for i in range(max(5, len(df) - 80), len(df) - 1):
+                if not bool(impulso.iloc[i]):
+                    continue
+                dir_imp = 'CALL' if c.iloc[i] > o.iloc[i] else 'PUT'
+                z = float(max(atr.iloc[i], atr_last) * float(max(0.2, zona_atr_mult)))
+                if dir_imp == 'CALL':
+                    zl = float(l.iloc[i] - z * 0.15)
+                    zh = float(l.iloc[i] + z)
+                else:
+                    zl = float(h.iloc[i] - z)
+                    zh = float(h.iloc[i] + z * 0.15)
+                zonas.append({
+                    'idx': int(i),
+                    'direccion': dir_imp,
+                    'low': min(zl, zh),
+                    'high': max(zl, zh)
+                })
+
+            precio = float(c.iloc[-1])
+            zona_buy_activa = False
+            zona_sell_activa = False
+            ult_buy = None
+            ult_sell = None
+            for z in reversed(zonas):
+                if z['direccion'] == 'CALL' and ult_buy is None:
+                    ult_buy = z
+                if z['direccion'] == 'PUT' and ult_sell is None:
+                    ult_sell = z
+                if ult_buy and ult_sell:
+                    break
+
+            if ult_buy is not None and ult_buy['low'] <= precio <= ult_buy['high']:
+                zona_buy_activa = True
+            if ult_sell is not None and ult_sell['low'] <= precio <= ult_sell['high']:
+                zona_sell_activa = True
+
+            ema_f = IndicatorsPropios.EMA(c, ema_fast).iloc[-1]
+            ema_s = IndicatorsPropios.EMA(c, ema_slow).iloc[-1]
+            trend = 'CALL' if ema_f > ema_s else ('PUT' if ema_f < ema_s else 'NEUTRAL')
+
+            direccion = 'NEUTRAL'
+            if zona_buy_activa and not zona_sell_activa:
+                direccion = 'CALL'
+            elif zona_sell_activa and not zona_buy_activa:
+                direccion = 'PUT'
+            elif trend in ('CALL', 'PUT'):
+                direccion = trend
+
+            score = 0.0
+            if direccion in ('CALL', 'PUT'):
+                score = 55.0
+                if (direccion == trend):
+                    score += 20.0
+                if (zona_buy_activa or zona_sell_activa):
+                    score += 15.0
+                if atr_last > 0:
+                    score += min(10.0, float(cuerpo.tail(3).mean() / atr_last) * 3.0)
+                score = max(0.0, min(100.0, score))
+
+            circulos = []
+            for z in zonas[-5:]:
+                circulos.append({
+                    'tipo': 'BUY_ZONE' if z['direccion'] == 'CALL' else 'SELL_ZONE',
+                    'precio': float((z['low'] + z['high']) / 2.0),
+                    'activo': bool((z['direccion'] == 'CALL' and zona_buy_activa) or (z['direccion'] == 'PUT' and zona_sell_activa))
+                })
+
+            flecha = '↑' if direccion == 'CALL' else ('↓' if direccion == 'PUT' else '•')
+            return {
+                'direccion': direccion,
+                'score': float(score),
+                'zona_compra_activa': bool(zona_buy_activa),
+                'zona_venta_activa': bool(zona_sell_activa),
+                'trend': trend,
+                'flecha': flecha,
+                'zonas': zonas[-10:],
+                'circulos': circulos
+            }
+        except Exception:
+            return {
+                'direccion': 'NEUTRAL',
+                'score': 0.0,
+                'zona_compra_activa': False,
+                'zona_venta_activa': False,
+                'zonas': [],
+                'circulos': []
+            }
+
+    @staticmethod
     def get_analysis_pack(df: pd.DataFrame) -> dict:
         """
         Paquete de análisis completo para el motor.
@@ -1186,6 +1303,7 @@ class IndicatorsPropios:
         # TDI
         tdi_data = IndicatorsPropios.TDI(df)
         div = IndicatorsPropios.TDI_DIVERGENCIA(df)
+        rfi = IndicatorsPropios.RFI_ZONAS(df)
         return {
             'precio': precio_actual,
             'ema_21': ema_21,
@@ -1199,7 +1317,8 @@ class IndicatorsPropios:
             'tdi_div_bull': div.get('bullish', False),
             'tdi_div_bear': div.get('bearish', False),
             'tdi_div_bull_bars': div.get('bull_bars'),
-            'tdi_div_bear_bars': div.get('bear_bars')
+            'tdi_div_bear_bars': div.get('bear_bars'),
+            'rfi': rfi
         }
 
 
@@ -1750,6 +1869,14 @@ class MotorTradingIntegrado:
         trend_ema = self.verificar_tendencia_ema_50_200(data)
         trend_tdi = self.verificar_tdi_signal(data)
 
+        # TPSpro RFI/LOGIC AI
+        rfi_data = data.get("rfi", {}) if isinstance(data, dict) else {}
+        rfi_dir = str((rfi_data or {}).get("direccion", "NEUTRAL")).upper()
+        try:
+            rfi_score = float((rfi_data or {}).get("score", 0.0) or 0.0)
+        except Exception:
+            rfi_score = 0.0
+
         # Score técnico granular (0-100)
         score_ema = 0.0
         score_tdi = 0.0
@@ -1782,6 +1909,24 @@ class MotorTradingIntegrado:
 
         tecnico_fuerza_base = score_ema + score_tdi
         tecnico_fuerza_base = max(0.0, min(100.0, tecnico_fuerza_base))
+
+        if bool(getattr(self.config, "RFI_HABILITADO", True)):
+            # Si RFI contradice IA, filtramos operación
+            if ia_direccion in ("CALL", "PUT") and rfi_dir in ("CALL", "PUT") and rfi_dir != ia_direccion:
+                return {
+                    "accion": "WAIT",
+                    "confianza": round(tecnico_fuerza_base, 2),
+                    "motivo": "RFI_DIRECCION_CONTRARIA",
+                    "ia_confianza": ia_fuerza,
+                    "tecnico_confianza": tecnico_fuerza_base,
+                    "ia_score": ia_score,
+                    "tecnico_score": 0.0,
+                    "rfi_direccion": rfi_dir,
+                    "rfi_score": rfi_score
+                }
+            # Bonus técnico cuando RFI confirma la dirección
+            if ia_direccion in ("CALL", "PUT") and rfi_dir == ia_direccion:
+                tecnico_fuerza_base = min(100.0, tecnico_fuerza_base + min(20.0, rfi_score * 0.20))
 
         w_ia = float(getattr(self.config, "PESO_NEURONAL", 0.60) or 0.60)
         w_tec = float(getattr(self.config, "PESO_TECNICO", 0.40) or 0.40)
@@ -1996,7 +2141,9 @@ class MotorTradingIntegrado:
                 "ia_confianza": ia_fuerza,
                 "tecnico_confianza": tecnico_score,
                 "ia_score": ia_score,
-                "tecnico_score": tecnico_score_signed
+                "tecnico_score": tecnico_score_signed,
+                "rfi_direccion": rfi_dir,
+                "rfi_score": rfi_score
             }
 
         # -------------------------
@@ -2014,7 +2161,9 @@ class MotorTradingIntegrado:
                 "ia_confianza": ia_fuerza,
                 "tecnico_confianza": tecnico_score,
                 "ia_score": ia_score,
-                "tecnico_score": tecnico_score_signed
+                "tecnico_score": tecnico_score_signed,
+                "rfi_direccion": rfi_dir,
+                "rfi_score": rfi_score
             }
 
         return {
@@ -2024,7 +2173,9 @@ class MotorTradingIntegrado:
             "ia_confianza": ia_fuerza,
             "tecnico_confianza": tecnico_score,
             "ia_score": ia_score,
-            "tecnico_score": tecnico_score_signed
+            "tecnico_score": tecnico_score_signed,
+            "rfi_direccion": rfi_dir,
+            "rfi_score": rfi_score
         }
 
     # ==========================================================
@@ -2072,6 +2223,17 @@ class MotorTradingIntegrado:
                 }
             motivo_orig = res_5m.get("motivo", "")
             res_5m["motivo"] = f"{motivo_orig} | CONFLUENCIA_COMPLETA_1M_5M_15M"
+            res_5m["mtf_confirmado"] = True
+            rfi_dir = str(res_5m.get("rfi_direccion", "NEUTRAL")).upper()
+            res_5m["scanner_plantilla"] = "PLANTILLA_TENDENCIA" if rfi_dir == accion_5m else "PLANTILLA_BASE"
+            if bool(getattr(self.config, "RFI_ALERTAS_HABILITADAS", True)):
+                try:
+                    rfi_score = float(res_5m.get("rfi_score", 0.0) or 0.0)
+                    if rfi_score >= 70.0:
+                        self.logger.info(
+                            f"🔔 ALERTA RFI+MTF {accion_5m} | score={rfi_score:.1f} | plantilla={res_5m['scanner_plantilla']}")
+                except Exception:
+                    pass
             return res_5m
         return {
             "accion": "WAIT",
@@ -2082,7 +2244,9 @@ class MotorTradingIntegrado:
             "tecnico_score": res_5m.get("tecnico_score", 0),
             "ia_confianza": res_5m.get("ia_confianza", 0),
             "tecnico_confianza": res_5m.get("tecnico_confianza", 0),
-            "patron_wm": res_5m.get("patron_wm")
+            "patron_wm": res_5m.get("patron_wm"),
+            "mtf_confirmado": False,
+            "scanner_plantilla": "SIN_PLANTILLA"
         }
 
     def calcular_senal_final(
@@ -2104,6 +2268,19 @@ class MotorTradingIntegrado:
             analysis = ind_tec.get_analysis_pack(df)
             if not analysis:
                 return self._wait("ANALISIS_FALLIDO")
+
+            # Estrategia RFI/LOGIC AI (zonas activas compradores-vendedores)
+            if bool(getattr(self.config, "RFI_HABILITADO", True)):
+                try:
+                    analysis["rfi"] = IndicatorsPropios.RFI_ZONAS(
+                        df,
+                        impulso_mult_atr=float(getattr(self.config, "RFI_IMPULSO_MULT_ATR", 1.2) or 1.2),
+                        zona_atr_mult=float(getattr(self.config, "RFI_ZONA_ATR_MULT", 0.5) or 0.5),
+                        ema_fast=int(getattr(self.config, "RFI_TREND_EMA_FAST", 21) or 21),
+                        ema_slow=int(getattr(self.config, "RFI_TREND_EMA_SLOW", 50) or 50),
+                    )
+                except Exception:
+                    pass
 
             # IA real
             nn_pred = 0.0
@@ -2455,6 +2632,18 @@ class ConfiguracionTrading:
         self.WM_EXTREMO_DIST_ATR = 0.40
         self.WM_CONFIRM_BODY_ATR = 0.18
         self.WM_CONFIRM_NECK_ATR = 0.06
+
+        # ==========================================
+        # TPSpro RFI / LOGIC AI (zonas comprador-vendedor)
+        # ==========================================
+        self.RFI_HABILITADO = True
+        self.RFI_MTF_HABILITADO = True
+        self.RFI_IMPULSO_MULT_ATR = 1.2
+        self.RFI_ZONA_ATR_MULT = 0.5
+        self.RFI_ALERTAS_HABILITADAS = True
+        self.RFI_TREND_EMA_FAST = 21
+        self.RFI_TREND_EMA_SLOW = 50
+
 
         # ==========================================
         # ESCANEO Y CACHE
