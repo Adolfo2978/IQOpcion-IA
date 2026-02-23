@@ -9363,6 +9363,8 @@ class IQOptionBridge:
         self._candles_callbacks = {}
         self._candles_event_queue = Queue(maxsize=5000)
         self._last_queue_relief_ts = 0.0
+        self._stream_retry_state = {}
+        self._stream_warn_throttle = {}
         self._candles_publisher_stop = threading.Event()
         self._candles_publisher_thread = None
         self._last_event_ts = 0.0
@@ -10124,24 +10126,72 @@ class IQOptionBridge:
             target=self._loop_publicador_velas, daemon=True)
         self._candles_publisher_thread.start()
 
+    def _permitir_reintento_stream(self, simbolo: str, timeframe_segundos: int) -> bool:
+        try:
+            key = f"{simbolo}:{int(timeframe_segundos)}"
+            now = time.time()
+            st = self._stream_retry_state.get(key, {})
+            next_ts = float(st.get("next_retry_ts", 0.0) or 0.0)
+            return now >= next_ts
+        except Exception:
+            return True
+
+    def _registrar_fallo_stream(self, simbolo: str, timeframe_segundos: int):
+        try:
+            key = f"{simbolo}:{int(timeframe_segundos)}"
+            now = time.time()
+            st = self._stream_retry_state.get(key, {})
+            fails = int(st.get("fails", 0) or 0) + 1
+            cooldown = min(300.0, float(2 ** min(fails, 8)))
+            self._stream_retry_state[key] = {
+                "fails": fails,
+                "next_retry_ts": now + cooldown
+            }
+        except Exception:
+            pass
+
+    def _registrar_exito_stream(self, simbolo: str, timeframe_segundos: int):
+        try:
+            key = f"{simbolo}:{int(timeframe_segundos)}"
+            if key in self._stream_retry_state:
+                self._stream_retry_state.pop(key, None)
+        except Exception:
+            pass
+
     def _iniciar_stream_velas_con_timeout(self, simbolo: str, timeframe_segundos: int,
                                          maxdict: int, timeout_s: float = 8.0) -> bool:
         """Inicia stream con timeout real para evitar bloqueos largos del hilo."""
         try:
+            if not self._permitir_reintento_stream(simbolo, timeframe_segundos):
+                return False
             timeout_s = float(max(3.0, timeout_s))
             ok = self._call_with_timeout(
                 self.api.start_candles_stream,
                 args=(simbolo, int(timeframe_segundos), int(maxdict)),
                 timeout=timeout_s,
             )
-            return bool(ok)
+            if bool(ok):
+                self._registrar_exito_stream(simbolo, timeframe_segundos)
+                return True
+            self._registrar_fallo_stream(simbolo, timeframe_segundos)
+            return False
         except TimeoutError:
             self._record_candles_timeout()
-            logger.warning(
-                f"⏱️ Tiempo de espera agotado ({int(timeout_s)}s) al iniciar stream de velas "
-                f"para {simbolo} [{int(timeframe_segundos)}s]")
+            self._registrar_fallo_stream(simbolo, timeframe_segundos)
+            try:
+                key = f"{simbolo}:{int(timeframe_segundos)}"
+                now = time.time()
+                last_warn = float(self._stream_warn_throttle.get(key, 0.0) or 0.0)
+                if now - last_warn >= 20.0:
+                    logger.warning(
+                        f"⏱️ Tiempo de espera agotado ({int(timeout_s)}s) al iniciar stream de velas "
+                        f"para {simbolo} [{int(timeframe_segundos)}s]")
+                    self._stream_warn_throttle[key] = now
+            except Exception:
+                pass
             return False
         except Exception as e:
+            self._registrar_fallo_stream(simbolo, timeframe_segundos)
             logger.debug(
                 f"Error iniciando stream de velas para {simbolo} [{int(timeframe_segundos)}s]: {e}")
             return False
@@ -10408,8 +10458,8 @@ class IQOptionBridge:
                         break
                     time.sleep(0.5)
                 if ok is False:
-                    logging.warning(
-                        f"No se pudo resuscribir stream para {simbolo}")
+                    logger.debug(
+                        f"No se pudo resuscribir stream para {simbolo} (en cooldown/reintento)")
                     continue
             except Exception:
                 continue
@@ -24188,7 +24238,7 @@ class ConsolaFlotante:
         self.lbl_trader = None
         self.lbl_resultados = None
 
-        self._ui_queue = Queue()
+        self._ui_queue = Queue(maxsize=5000)
         self.max_log_rows = 1000
 
         # 🧵 Hilos auxiliares
@@ -24210,7 +24260,13 @@ class ConsolaFlotante:
         try:
             if not self.running:
                 return
-            self._ui_queue.put(("log", str(mensaje)))
+            msg = str(mensaje)
+            # Evitar congelamiento por tormenta de logs: priorizar WARNING/ERROR/CRITICAL
+            if self._ui_queue.qsize() > 3500:
+                m = msg.upper()
+                if not any(x in m for x in ("WARNING", "ERROR", "CRITICAL", "FREEZE_DETECT")):
+                    return
+            self._ui_queue.put_nowait(("log", msg))
         except Exception:
             pass
 
