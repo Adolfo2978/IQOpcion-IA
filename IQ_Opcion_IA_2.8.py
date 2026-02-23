@@ -23976,6 +23976,7 @@ class ConsolaFlotante:
         self.running = True
         self.root = None
         self.tree = None
+        self.log_text = None
         self.lbl_importe = None
         self.lbl_entrenamiento = None
         self.lbl_estadistica = None
@@ -24023,6 +24024,46 @@ class ConsolaFlotante:
         if self.root and self.config:
             self._ui_queue.put(("open_config", None))
 
+    def _clear_log_view(self):
+        try:
+            if self.tree is not None:
+                self.tree.delete(*self.tree.get_children())
+            if self.log_text is not None:
+                self.log_text.configure(state="normal")
+                self.log_text.delete("1.0", tk.END)
+                self.log_text.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _append_terminal_line(self, hora: str, nivel: str, comp: str, texto: str):
+        if self.log_text is None:
+            return
+        try:
+            lvl = str(nivel or "INFO").upper()
+            icon = {
+                "INFO": "[+]",
+                "WARNING": "[!]",
+                "ERROR": "[x]",
+                "DEBUG": "[·]"
+            }.get(lvl, "[+]")
+            line = f"{hora:>8} {icon:<3} {comp:<18} | {texto}\n"
+            tag = lvl if lvl in ("INFO", "WARNING", "ERROR", "DEBUG") else "INFO"
+
+            self.log_text.configure(state="normal")
+            self.log_text.insert(tk.END, line, (tag,))
+
+            # Limitar líneas para no crecer sin control
+            max_lines = int(getattr(self, "max_log_rows", 1000) or 1000)
+            total_lines = int(float(self.log_text.index('end-1c').split('.')[0]))
+            if total_lines > max_lines:
+                extra = total_lines - max_lines
+                self.log_text.delete("1.0", f"{extra + 1}.0")
+
+            self.log_text.see(tk.END)
+            self.log_text.configure(state="disabled")
+        except Exception:
+            pass
+
     def _ui_loop(self):
         try:
             self.root = tk.Tk()
@@ -24057,7 +24098,7 @@ class ConsolaFlotante:
             btn_config.pack(side=tk.RIGHT, padx=8, pady=4)
 
             btn_clear = tk.Button(toolbar, text="🧹 Limpiar Log",
-                                  command=lambda: self.tree.delete(*self.tree.get_children()) if self.tree is not None else None,
+                                  command=lambda: self._clear_log_view(),
                                   bg="#374151", fg="#F9FAFB", relief="flat", font=("Segoe UI", 9))
             btn_clear.pack(side=tk.RIGHT, padx=4, pady=4)
 
@@ -24127,48 +24168,43 @@ class ConsolaFlotante:
                 frame_dash, text="$0.00", **style_lbl_val)
             self.lbl_resultados.pack(fill=tk.X)
 
-            # --- PANEL DERECHO (Logs en Columnas) ---
-            frame_log = tk.Frame(paned, bg="black")
-            paned.add(frame_log, minsize=500)
+            # --- PANEL DERECHO (Terminal profesional) ---
+            frame_log = tk.Frame(paned, bg="#05070B")
+            paned.add(frame_log, minsize=700)
 
-            # Treeview y Scrollbar
-            columns = ("hora", "nivel", "componente", "mensaje")
-            self.tree = ttk.Treeview(
+            header = tk.Label(
                 frame_log,
-                columns=columns,
-                show="headings",
-                selectmode="browse")
+                text="┌─ TERMINAL DE OPERACIONES ────────────────────────────────────────────────────────────────┐",
+                bg="#05070B", fg="#94A3B8", font=("Consolas", 10, "bold"), anchor="w")
+            header.pack(fill=tk.X, padx=8, pady=(6, 0))
 
-            # Configurar columnas
-            self.tree.column("hora", width=150, minwidth=100)
-            self.tree.column("nivel", width=80, minwidth=60, anchor="center")
-            self.tree.column("componente", width=120, minwidth=80)
-            self.tree.column("mensaje", width=500, minwidth=200)
-
-            self.tree.heading("hora", text="HORA")
-            self.tree.heading("nivel", text="NIVEL")
-            self.tree.heading("componente", text="COMPONENTE")
-            self.tree.heading("mensaje", text="MENSAJE")
-
-            scrollbar = ttk.Scrollbar(
+            self.log_text = tk.Text(
                 frame_log,
-                orient=tk.VERTICAL,
-                command=self.tree.yview)
-            self.tree.configure(yscroll=scrollbar.set)
+                bg="#05070B",
+                fg="#22C55E",
+                insertbackground="#22C55E",
+                font=("Consolas", 10),
+                relief="flat",
+                wrap="none",
+                state="disabled")
 
-            self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            y_scroll = ttk.Scrollbar(frame_log, orient=tk.VERTICAL, command=self.log_text.yview)
+            x_scroll = ttk.Scrollbar(frame_log, orient=tk.HORIZONTAL, command=self.log_text.xview)
+            self.log_text.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
 
-            # Tags de colores para niveles
-            self.tree.tag_configure(
-                "INFO", foreground="#22C55E")
-            self.tree.tag_configure(
-                "WARNING", foreground="#F59E0B")
-            self.tree.tag_configure("ERROR", foreground="#EF4444")
-            self.tree.tag_configure("DEBUG", foreground="#9CA3AF")
-            self.tree.tag_configure("ROW_ODD", background="#111827")
-            self.tree.tag_configure("ROW_EVEN", background="#0B1220")
+            self.log_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=6)
+            x_scroll.pack(side=tk.BOTTOM, fill=tk.X, padx=8)
+            y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
+            self.log_text.tag_configure("INFO", foreground="#22C55E")
+            self.log_text.tag_configure("WARNING", foreground="#F59E0B")
+            self.log_text.tag_configure("ERROR", foreground="#EF4444")
+            self.log_text.tag_configure("DEBUG", foreground="#9CA3AF")
+
+            self.log_text.configure(state="normal")
+            self.log_text.insert(tk.END, "TIME     LVL COMPONENT           | MESSAGE\n", ("DEBUG",))
+            self.log_text.insert(tk.END, "-------- --- -------------------+---------------------------------------------------------\n", ("DEBUG",))
+            self.log_text.configure(state="disabled")
             self.status_var = tk.StringVar(value="Estado: En ejecución | Alineación 1m/5m activa")
             tk.Label(self.root, textvariable=self.status_var, bg="#0B1220", fg="#93C5FD", anchor="w", font=("Segoe UI", 9)).pack(fill=tk.X, side=tk.BOTTOM)
 
@@ -24191,47 +24227,17 @@ class ConsolaFlotante:
                                 ConfigDialogTk(self.root, self.config)
                             except Exception as e:
                                 print(f"Error abriendo config: {e}")
-                        elif kind == "log" and self.tree is not None:
+                        elif kind == "log" and self.log_text is not None:
                             try:
                                 msg = str(payload).strip()
-                                # Parsear log: "YYYY-MM-DD HH:MM:SS,ms - Comp - LVL - Msg"
-                                # Regex simplificada para capturar grupos
                                 match = re.match(
                                     r"^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}),\d+\s+-\s+(\S+)\s+-\s+(\w+)\s+-\s+(.*)$", msg)
-
                                 if match:
                                     hora, comp, nivel, texto = match.groups()
-                                    tag = nivel.upper() if nivel.upper() in (
-                                        "INFO", "WARNING", "ERROR", "DEBUG") else "INFO"
-                                    idx = len(self.tree.get_children())
-                                    row_tag = "ROW_EVEN" if idx % 2 == 0 else "ROW_ODD"
-                                    self.tree.insert(
-                                        "", tk.END, values=(
-                                            hora, nivel, comp, texto), tags=(
-                                            row_tag, tag))
-                                    if self.max_log_rows:
-                                        children = self.tree.get_children()
-                                        if len(children) > self.max_log_rows:
-                                            for item in children[:len(children) - self.max_log_rows]:
-                                                self.tree.delete(item)
+                                    self._append_terminal_line(hora[-8:], nivel, comp, texto)
                                 else:
-                                    # Fallback para mensajes sin formato
                                     ahora = time.strftime("%H:%M:%S")
-                                    idx = len(self.tree.get_children())
-                                    row_tag = "ROW_EVEN" if idx % 2 == 0 else "ROW_ODD"
-                                    self.tree.insert(
-                                        "", tk.END, values=(
-                                            ahora, "INFO", "System", msg), tags=(
-                                            row_tag, "INFO"))
-                                    if self.max_log_rows:
-                                        children = self.tree.get_children()
-                                        if len(children) > self.max_log_rows:
-                                            for item in children[:len(children) - self.max_log_rows]:
-                                                self.tree.delete(item)
-
-                                # Auto-scroll al final
-                                if self.tree.get_children():
-                                    self.tree.yview_moveto(1)
+                                    self._append_terminal_line(ahora, "INFO", "System", msg)
                             except Exception:
                                 pass
                         elif kind == "update_dash":
