@@ -10730,6 +10730,12 @@ class IQOptionBridge:
         base_delay = 2
         delay = base_delay
 
+        email, password = self._cargar_credenciales()
+        if not email or not password:
+            logger.error("❌ Reconexión abortada: credenciales IQ Option no disponibles")
+            self.connected = False
+            return False
+
         for attempt in range(max_retries):
             try:
                 logger.info(f"▶ Intento de reconexión {attempt + 1}/{max_retries}...")
@@ -10748,7 +10754,7 @@ class IQOptionBridge:
                 time.sleep(1.5)  # Breve pausa para evitar race condition
 
                 # 3. Crear nueva instancia
-                self.api = IQ_Option_Stable(EMAIL, PASSWORD)
+                self.api = IQ_Option_Stable(email, password)
                 logger.debug("✓ Nueva instancia de API creada.")
                 self._parchear_atributos_ws_iqoptionapi()
                 try:
