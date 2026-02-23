@@ -54,18 +54,26 @@ def function_spans(mod: ast.Module) -> list[dict[str, Any]]:
 
 def risk_flags(mod: ast.Module) -> list[dict[str, Any]]:
     flags: list[dict[str, Any]] = []
+
+    # Riesgo específico: FORCE_CONSOLE hardcodeado a bool literal en scope módulo.
+    for n in mod.body:
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name) and t.id == "FORCE_CONSOLE":
+                    if isinstance(n.value, ast.Constant) and isinstance(n.value.value, bool):
+                        flags.append({
+                            "type": "hardcoded_console_mode",
+                            "line": n.lineno,
+                            "value": ast.unparse(n.value) if hasattr(ast, "unparse") else "N/A",
+                        })
+
     for n in ast.walk(mod):
         if isinstance(n, ast.ExceptHandler):
             if n.type is None:
                 flags.append({"type": "bare_except", "line": n.lineno})
             elif isinstance(n.type, ast.Name) and n.type.id in {"Exception", "BaseException"}:
-                # detectar si solo hace pass
                 if len(n.body) == 1 and isinstance(n.body[0], ast.Pass):
                     flags.append({"type": "silent_exception", "line": n.lineno, "exc": n.type.id})
-        if isinstance(n, ast.Assign):
-            for t in n.targets:
-                if isinstance(t, ast.Name) and t.id == "FORCE_CONSOLE":
-                    flags.append({"type": "hardcoded_console_mode", "line": n.lineno, "value": ast.unparse(n.value) if hasattr(ast, 'unparse') else 'N/A'})
     return flags
 
 

@@ -60,11 +60,9 @@ _args, _unknown = _parser.parse_known_args()
 IS_WINDOWS = platform.system() == 'Windows'
 IS_REPLIT = os.environ.get(
     'REPL_ID') is not None or os.environ.get('REPLIT') is not None
-FORCE_CONSOLE = True
-HEADLESS_MODE = False
-if FORCE_CONSOLE:
-    HEADLESS_MODE = True
-elif IS_REPLIT:
+FORCE_CONSOLE = bool(_args.console or _args.headless or os.environ.get('HEADLESS', '').lower() == 'true')
+HEADLESS_MODE = FORCE_CONSOLE
+if IS_REPLIT:
     HEADLESS_MODE = True  # Replit siempre es headless
 elif not IS_WINDOWS:
     HEADLESS_MODE = os.environ.get('DISPLAY') is None
@@ -103,8 +101,8 @@ def datos_rel(filename: str) -> str:
 def asegurar_directorio_datos() -> None:
     try:
         os.makedirs(DATOS_DIR, exist_ok=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("No se pudo crear directorio de datos '%s': %s", DATOS_DIR, exc)
     
     # BLOQUE ELIMINADO: Código suelto con variables no definidas
     # if tiempo_actual - ultima_retrain > self.AI_RETRAIN_EVERY_MINUTES * 60:
@@ -133,10 +131,10 @@ def migrar_archivos_datos() -> None:
                 try:
                     import shutil
                     shutil.copy2(ruta, destino)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as copy_exc:
+                    logger.warning("No se pudo mover/copiar '%s' a '%s': %s", ruta, destino, copy_exc)
+    except Exception as exc:
+        logger.warning("Error durante migración de archivos de datos: %s", exc)
 
 
 migrar_archivos_datos()
@@ -157,8 +155,8 @@ try:
     _noise_filter = _IQOptionAPINoiseFilter()
     logging.getLogger().addFilter(_noise_filter)
     logging.getLogger("iqoptionapi").addFilter(_noise_filter)
-except Exception:
-    pass
+except Exception as exc:
+    logger.debug("No se pudo registrar filtro de ruido de IQOption API: %s", exc)
 
 
 class LogHandlerGUI(logging.Handler):
@@ -24706,8 +24704,17 @@ if __name__ == "__main__":
         help='Enviar prueba de señal destacada y confirmada a Telegram')
     args, _ = parser.parse_known_args()
 
-    FORCE_CONSOLE = True
-    FORCE_GUI = False
+    FORCE_CONSOLE = bool(
+        args.console
+        or args.headless
+        or os.environ.get('HEADLESS', '').lower() == 'true'
+        or IS_REPLIT
+        or (not IS_WINDOWS and os.environ.get('DISPLAY') is None)
+    )
+    FORCE_GUI = bool(args.gui)
+
+    if FORCE_GUI:
+        FORCE_CONSOLE = False
 
     # DEFENSIVE CHECK: If GUI is not available, always run in headless mode
     if not GUI_AVAILABLE and not FORCE_CONSOLE:
@@ -24725,8 +24732,8 @@ if __name__ == "__main__":
             ok = _prueba_telegram_envio(cfg, bridge if ok_conn else None)
             try:
                 bridge.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("No se pudo desconectar bridge en test de Telegram: %s", exc)
             sys.exit(0 if ok else 1)
         else:
             run_headless_mode()
@@ -24749,8 +24756,8 @@ if __name__ == "__main__":
                     pref = json.load(f)
                     if pref.get("recordar"):
                         modo_auto = pref.get("modo")
-        except BaseException:
-            pass
+        except BaseException as exc:
+            logger.warning("No se pudo leer modo_preferido.json: %s", exc)
 
         if modo_auto == "consola":
             run_headless_mode()
