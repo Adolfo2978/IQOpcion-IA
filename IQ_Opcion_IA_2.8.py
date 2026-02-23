@@ -2539,6 +2539,8 @@ class ConfiguracionTrading:
         self.MAX_OPERACIONES_SIMULTANEAS = 1
         self.TIEMPO_EXPIRACION = 5
         self.AUTOAPRENDIZAJE_SOLO_WINS = True
+        self.AUTO_INICIAR_STREAMS_EN_CONEXION = False
+        self.MAX_STREAMS_INICIO = 8
         self.CAPITAL_INICIAL = 10.0
         self.LOTE_SIZE_ACTUAL = 1.0
         self.LOTE_SIZE_INICIAL = 1.0
@@ -10047,6 +10049,15 @@ class IQOptionBridge:
         if isinstance(buffer_velas, deque):
             buffer_velas.append(vela)
 
+        # Si no hay callbacks registrados, evitar inflar cola innecesariamente
+        if not callbacks:
+            try:
+                qsize_now = int(self._candles_event_queue.qsize())
+                if qsize_now >= 200:
+                    return
+            except Exception:
+                pass
+
         evento = {
             "stream_id": stream_key,
             "simbolo": simbolo,
@@ -11145,9 +11156,13 @@ class IQOptionBridge:
                         pares_activos = getattr(
                             self.config, 'PARES_TRADING', [])
 
-                        if pares_activos:
-                            # Limitar a top 20 pares para evitar bloqueo
-                            pares_stream = pares_activos[:20]
+                        auto_streams = bool(getattr(self.config, "AUTO_INICIAR_STREAMS_EN_CONEXION", False))
+                        if pares_activos and auto_streams:
+                            # Limitar streams iniciales para evitar freeze durante arranque/cold-start
+                            max_streams = int(getattr(self.config, "MAX_STREAMS_INICIO", 8) or 8)
+                            if max_streams <= 0:
+                                max_streams = 8
+                            pares_stream = pares_activos[:max_streams]
                             logger.info(
                                 f"⚡ Activando streams de velas para {len(pares_stream)} pares (TF: {tf_str})...")
                             for par in pares_stream:
@@ -11157,6 +11172,9 @@ class IQOptionBridge:
                                     pass
                             logger.info(
                                 "✅ Streams de velas activados correctamente")
+                        elif pares_activos and not auto_streams:
+                            logger.info(
+                                "⏸️ Auto streams en conexión deshabilitado (se activarán bajo demanda)")
                         else:
                             logger.warning(
                                 "⚠️ No hay pares configurados para suscribir a streams")
@@ -22792,6 +22810,23 @@ def run_headless_mode():
         # =============================
         # Loop principal de trading
         # =============================
+        # Activar streams de forma controlada post-cold-start para evitar congelamientos
+        try:
+            if bool(getattr(config, "AUTO_INICIAR_STREAMS_EN_CONEXION", False)):
+                tf_str = str(getattr(config, 'MARCO_TIEMPO_SELECCIONADO', '5'))
+                max_streams = int(getattr(config, "MAX_STREAMS_INICIO", 8) or 8)
+                pares_stream = list(getattr(config, 'PARES_TRADING', []) or [])[:max_streams]
+                if pares_stream:
+                    logger.info(
+                        f"⚡ Activación post-cold-start de streams: {len(pares_stream)} pares (TF: {tf_str})")
+                    for par in pares_stream:
+                        try:
+                            bridge.subscribe_candles(par, tf_str)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.warning(f"No se pudo activar streams post-cold-start: {e}")
+
         logger.info("Iniciando loop de trading (Ctrl+C para detener)")
 
         ultima_actualizacion_pares = time.time()
