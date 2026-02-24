@@ -2303,6 +2303,20 @@ class MotorTradingIntegrado:
             self.logger.error("API no disponible")
             return None
 
+        # Filtro de calidad para reducir pérdidas por señales débiles
+        confianza = float(decision.get("confianza", 0.0) or 0.0)
+        umbral = float(getattr(self.config, "AUTO_EJECUTAR_MIN_CONFIANZA", 92.0) or 92.0)
+        if confianza < umbral:
+            self.logger.info(
+                f"Trade omitido por confianza baja: {par} {decision.get('accion')} {confianza:.1f}% < {umbral:.1f}%"
+            )
+            return None
+
+        tipo_senal = str(decision.get("tipo_senal", "")).upper()
+        if tipo_senal and tipo_senal not in ("CONFIRMADA", "DESTACADA"):
+            self.logger.info(f"Trade omitido por tipo_senal={tipo_senal} en {par}")
+            return None
+
         monto = self.config.calcular_monto_operacion()
         duracion_min = expiracion_segundos // 60
 
@@ -2642,7 +2656,7 @@ class ConfiguracionTrading:
         self.MAX_TRADES_POR_HORA = 4
         self.MAX_TRADES_POR_DIA = 25
         self.AUTO_EJECUTAR_BROKER = False
-        self.AUTO_EJECUTAR_MIN_CONFIANZA = 85.0
+        self.AUTO_EJECUTAR_MIN_CONFIANZA = 92.0
         self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = 30
         self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 240
         self.COOLDOWN_POST_LOSS_SEC = 240
@@ -7656,6 +7670,17 @@ class SeguimientoSenales:
     def _evaluar_operaciones_automaticas(self):
         """Evalúa y ejecuta operaciones automáticas para modo continuo"""
         try:
+            # Frenar si la sesión viene en drawdown
+            if self.iq_bridge:
+                wins = int(getattr(self.iq_bridge, 'sesion_wins', 0) or 0)
+                losses = int(getattr(self.iq_bridge, 'sesion_losses', 0) or 0)
+                total = wins + losses
+                if total >= 8:
+                    wr = (wins / total) * 100.0
+                    if wr < 52.0:
+                        self.logger.info(f"Auto-ejecución pausada por winrate bajo: {wr:.1f}%")
+                        return
+
             # Filtrar señales válidas para operar
             señales_operables = []
 
@@ -7663,8 +7688,13 @@ class SeguimientoSenales:
                 if senal.get("accion") not in ["CALL", "PUT"]:
                     continue
 
-                if senal.get("confianza",
-                             0) < self.config.AUTO_EJECUTAR_MIN_CONFIANZA:
+                confianza = float(senal.get("confianza", 0) or 0)
+                min_conf = float(getattr(self.config, "AUTO_EJECUTAR_MIN_CONFIANZA", 92.0) or 92.0)
+                if confianza < min_conf:
+                    continue
+
+                tipo_senal = str(senal.get("tipo_senal", "")).upper()
+                if tipo_senal and tipo_senal not in ("CONFIRMADA", "DESTACADA"):
                     continue
 
                 if not senal.get("alineacion_completa", False):
