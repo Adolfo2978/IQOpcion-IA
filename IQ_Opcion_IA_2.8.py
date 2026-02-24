@@ -4140,8 +4140,12 @@ class OperationsRepository:
                 alineacion_tf = trade.get('alineacion_tf')
             if not isinstance(alineacion_tf, dict):
                 alineacion_tf = None
-            if not exitoso:
+
+            # None significa operación pendiente (aún sin resultado)
+            if exitoso is None:
                 return
+
+            exitoso_bool = bool(exitoso)
             trade_record = {
                 'id': len(self.trades) + 1,
                 'timestamp': datetime.now().isoformat(),
@@ -4150,7 +4154,7 @@ class OperationsRepository:
                 'precio_entrada': trade.get('precio_entrada', 0),
                 'precio_salida': trade.get('precio_salida', 0),
                 'payout': trade.get('payout', 0.82),
-                'exitoso': exitoso,
+                'exitoso': exitoso_bool,
                 'ganancia': trade.get('ganancia', 0),
                 'alineacion_tf': alineacion_tf,
                 # Indicadores al momento del trade
@@ -9641,7 +9645,7 @@ class IQOptionBridge:
                                 solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True))
                                 if (not solo_wins) or is_win:
                                     self.ai_engine.learn_from_result(
-                                        is_win, direccion)
+                                        is_win, direccion, trade_id=order_id)
                     except Exception:
                         pass
                     cerradas += 1
@@ -13322,6 +13326,21 @@ class IQOptionBridge:
 
                 self.abrir_operacion(
                     order_id, simbolo, direccion_final, monto_final, expiracion_min)
+
+                # Sincronizar contexto IA con el order_id real para evitar
+                # desalineación entre predicción y feedback de resultado.
+                try:
+                    if self.ai_engine and hasattr(self.ai_engine, "register_trade_context"):
+                        feats = getattr(self.ai_engine, "_last_features", None)
+                        if feats is not None:
+                            self.ai_engine.register_trade_context(
+                                feats.copy() if hasattr(feats, "copy") else feats,
+                                direccion_final,
+                                int(order_id),
+                            )
+                except Exception as e:
+                    logger.debug(f"No se pudo registrar contexto IA de trade {order_id}: {e}")
+
                 logger.info(f"✅ Operación exitosa: ID {order_id}")
 
                 # Guardar resultado (simulado al abrir, se actualizará al

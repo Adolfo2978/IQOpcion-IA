@@ -1,6 +1,6 @@
 {
   "file": "IQ_Opcion_IA_2.8.py",
-  "total_lines": 24782,
+  "total_lines": 24801,
   "top_level_defs": 67,
   "imports_total": 41,
   "duplicate_imports": [
@@ -39,152 +39,152 @@
     },
     {
       "type": "silent_exception",
-      "line": 7135,
+      "line": 7139,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 8270,
+      "line": 8274,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 8293,
+      "line": 8297,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 8326,
+      "line": 8330,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 8352,
+      "line": 8356,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 9228,
+      "line": 9232,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 9342,
+      "line": 9346,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 9393,
+      "line": 9397,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10148,
+      "line": 10152,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10156,
+      "line": 10160,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10226,
+      "line": 10230,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10307,
+      "line": 10311,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10326,
+      "line": 10330,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10526,
+      "line": 10530,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 14525,
+      "line": 14544,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 14597,
+      "line": 14616,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 14617,
+      "line": 14636,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 16035,
+      "line": 16054,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 16070,
+      "line": 16089,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 18461,
+      "line": 18480,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 19287,
+      "line": 19306,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 19293,
+      "line": 19312,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 22924,
+      "line": 22943,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23571,
+      "line": 23590,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 24268,
+      "line": 24287,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24277,
+      "line": 24296,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24293,
+      "line": 24312,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24322,
+      "line": 24341,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24579,
+      "line": 24598,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24621,
+      "line": 24640,
       "exc": "Exception"
     },
     {
@@ -204,17 +204,12 @@
     },
     {
       "type": "silent_exception",
-      "line": 8161,
+      "line": 8165,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 9523,
-      "exc": "Exception"
-    },
-    {
-      "type": "silent_exception",
-      "line": 10206,
+      "line": 9527,
       "exc": "Exception"
     },
     {
@@ -224,7 +219,7 @@
     },
     {
       "type": "silent_exception",
-      "line": 10215,
+      "line": 10214,
       "exc": "Exception"
     },
     {
@@ -234,87 +229,92 @@
     },
     {
       "type": "silent_exception",
-      "line": 10295,
+      "line": 10223,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10344,
+      "line": 10299,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10627,
+      "line": 10348,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 12290,
+      "line": 10631,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 13461,
+      "line": 12294,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 14791,
+      "line": 13480,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 15162,
+      "line": 14810,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 17251,
+      "line": 15181,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 17308,
+      "line": 17270,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 19854,
+      "line": 17327,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 20666,
+      "line": 19873,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 20733,
+      "line": 20685,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 20763,
+      "line": 20752,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23493,
+      "line": 20782,
+      "exc": "Exception"
+    },
+    {
+      "type": "silent_exception",
+      "line": 23512,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 23584,
+      "line": 23603,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 24570,
+      "line": 24589,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24628,
+      "line": 24647,
       "exc": "Exception"
     },
     {
@@ -334,42 +334,37 @@
     },
     {
       "type": "silent_exception",
-      "line": 4606,
+      "line": 4610,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 4612,
+      "line": 4616,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 4711,
+      "line": 4715,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 7557,
+      "line": 7561,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10049,
+      "line": 10053,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10188,
+      "line": 10192,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 10224,
-      "exc": "Exception"
-    },
-    {
-      "type": "silent_exception",
-      "line": 10334,
+      "line": 10228,
       "exc": "Exception"
     },
     {
@@ -379,137 +374,142 @@
     },
     {
       "type": "silent_exception",
-      "line": 10819,
+      "line": 10342,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 12678,
+      "line": 10823,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 13270,
+      "line": 12682,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 14009,
+      "line": 13274,
+      "exc": "Exception"
+    },
+    {
+      "type": "silent_exception",
+      "line": 14028,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 14787,
+      "line": 14806,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 15016,
+      "line": 15035,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 16224,
+      "line": 16243,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 18091,
+      "line": 18110,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 18131,
+      "line": 18150,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 19516,
+      "line": 19535,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 21791,
+      "line": 21810,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 22229,
+      "line": 22248,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 7133,
+      "line": 7137,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 9275,
+      "line": 9279,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 9645,
+      "line": 9649,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 11259,
+      "line": 11263,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 11338,
+      "line": 11342,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 11533,
+      "line": 11537,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 11545,
+      "line": 11549,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 13871,
+      "line": 13890,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 20716,
+      "line": 20735,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 20724,
+      "line": 20743,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 20761,
+      "line": 20780,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 22006,
+      "line": 22025,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23126,
+      "line": 23145,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23472,
+      "line": 23491,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24527,
+      "line": 24546,
       "exc": "Exception"
     },
     {
@@ -519,42 +519,32 @@
     },
     {
       "type": "silent_exception",
-      "line": 14043,
+      "line": 14062,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 22887,
+      "line": 22906,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23077,
+      "line": 23096,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23250,
+      "line": 23269,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 11531,
+      "line": 11535,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 11543,
-      "exc": "Exception"
-    },
-    {
-      "type": "silent_exception",
-      "line": 24480,
-      "exc": "Exception"
-    },
-    {
-      "type": "silent_exception",
-      "line": 11423,
+      "line": 11547,
       "exc": "Exception"
     },
     {
@@ -564,7 +554,17 @@
     },
     {
       "type": "silent_exception",
-      "line": 24520,
+      "line": 11427,
+      "exc": "Exception"
+    },
+    {
+      "type": "silent_exception",
+      "line": 24518,
+      "exc": "Exception"
+    },
+    {
+      "type": "silent_exception",
+      "line": 24539,
       "exc": "Exception"
     }
   ],
@@ -572,43 +572,43 @@
     {
       "name": "IQOptionBridge",
       "kind": "ClassDef",
-      "lineno": 9285,
-      "end_lineno": 14063,
-      "size": 4779
+      "lineno": 9289,
+      "end_lineno": 14082,
+      "size": 4794
     },
     {
       "name": "ConfiguracionDialog",
       "kind": "ClassDef",
-      "lineno": 18408,
-      "end_lineno": 19810,
+      "lineno": 18427,
+      "end_lineno": 19829,
       "size": 1403
     },
     {
       "name": "EstrategiaMultiTimeframe",
       "kind": "ClassDef",
-      "lineno": 5635,
-      "end_lineno": 6911,
+      "lineno": 5639,
+      "end_lineno": 6915,
       "size": 1277
     },
     {
       "name": "SeguimientoSenales",
       "kind": "ClassDef",
-      "lineno": 7520,
-      "end_lineno": 8400,
+      "lineno": 7524,
+      "end_lineno": 8404,
       "size": 881
     },
     {
       "name": "MarketMakerStrategy",
       "kind": "ClassDef",
-      "lineno": 4769,
-      "end_lineno": 5628,
+      "lineno": 4773,
+      "end_lineno": 5632,
       "size": 860
     },
     {
       "name": "AnalizadorMercado",
       "kind": "ClassDef",
-      "lineno": 15172,
-      "end_lineno": 15987,
+      "lineno": 15191,
+      "end_lineno": 16006,
       "size": 816
     },
     {
@@ -621,8 +621,8 @@
     {
       "name": "TelegramNotifier",
       "kind": "ClassDef",
-      "lineno": 15994,
-      "end_lineno": 16684,
+      "lineno": 16013,
+      "end_lineno": 16703,
       "size": 691
     },
     {
@@ -635,8 +635,8 @@
     {
       "name": "AutoTrainer",
       "kind": "ClassDef",
-      "lineno": 8406,
-      "end_lineno": 9062,
+      "lineno": 8410,
+      "end_lineno": 9066,
       "size": 657
     }
   ],
