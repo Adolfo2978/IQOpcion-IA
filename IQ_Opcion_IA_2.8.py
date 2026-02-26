@@ -30,6 +30,7 @@ import random
 import time
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import pickle
 import threading
 import platform
@@ -39,7 +40,7 @@ import argparse
 from queue import Queue, Empty
 from collections import deque
 # Parsear argumentos de línea de comandos PRIMERO
-_parser = argparse.ArgumentParser(description='IQ Option Trading Bot 2.0')
+_parser = argparse.ArgumentParser(description='IQ Option Trading Bot 2.8 (Console Only)')
 _parser.add_argument(
     '--console',
     '-c',
@@ -49,6 +50,10 @@ _parser.add_argument(
     '--headless',
     action='store_true',
     help='Alias de --console')
+_parser.add_argument(
+    '--perfil',
+    choices=['balanceado', 'agresivo'],
+    help='Preset de configuración para modo consola')
 _args, _unknown = _parser.parse_known_args()
 # Configurar modo headless ANTES de importar PyQt5
 # Detectar si estamos en un entorno sin display
@@ -56,12 +61,9 @@ _args, _unknown = _parser.parse_known_args()
 IS_WINDOWS = platform.system() == 'Windows'
 IS_REPLIT = os.environ.get(
     'REPL_ID') is not None or os.environ.get('REPLIT') is not None
-FORCE_CONSOLE = _args.console or _args.headless or os.environ.get(
-    'HEADLESS', '').lower() == 'true'
-HEADLESS_MODE = False
-if FORCE_CONSOLE:
-    HEADLESS_MODE = True
-elif IS_REPLIT:
+FORCE_CONSOLE = bool(_args.console or _args.headless or os.environ.get('HEADLESS', '').lower() == 'true')
+HEADLESS_MODE = FORCE_CONSOLE
+if IS_REPLIT:
     HEADLESS_MODE = True  # Replit siempre es headless
 elif not IS_WINDOWS:
     HEADLESS_MODE = os.environ.get('DISPLAY') is None
@@ -71,8 +73,15 @@ if HEADLESS_MODE:
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 # Configuración de logging - Archivo + Consola en modo headless
+_log_max_mb = int(os.environ.get('LOG_MAX_MB', '20') or 20)
+_log_backup_count = int(os.environ.get('LOG_BACKUP_COUNT', '7') or 7)
 _log_handlers = [
-    logging.FileHandler('IQ_Option 2.8.6_pro.log', encoding='utf-8'),
+    RotatingFileHandler(
+        'IQ_Option 2.8_pro.log',
+        maxBytes=max(1, _log_max_mb) * 1024 * 1024,
+        backupCount=max(1, _log_backup_count),
+        encoding='utf-8'
+    ),
 
 ]
 if HEADLESS_MODE:
@@ -100,8 +109,8 @@ def datos_rel(filename: str) -> str:
 def asegurar_directorio_datos() -> None:
     try:
         os.makedirs(DATOS_DIR, exist_ok=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("No se pudo crear directorio de datos '%s': %s", DATOS_DIR, exc)
     
     # BLOQUE ELIMINADO: Código suelto con variables no definidas
     # if tiempo_actual - ultima_retrain > self.AI_RETRAIN_EVERY_MINUTES * 60:
@@ -130,10 +139,10 @@ def migrar_archivos_datos() -> None:
                 try:
                     import shutil
                     shutil.copy2(ruta, destino)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as copy_exc:
+                    logger.warning("No se pudo mover/copiar '%s' a '%s': %s", ruta, destino, copy_exc)
+    except Exception as exc:
+        logger.warning("Error durante migración de archivos de datos: %s", exc)
 
 
 migrar_archivos_datos()
@@ -154,8 +163,8 @@ try:
     _noise_filter = _IQOptionAPINoiseFilter()
     logging.getLogger().addFilter(_noise_filter)
     logging.getLogger("iqoptionapi").addFilter(_noise_filter)
-except Exception:
-    pass
+except Exception as exc:
+    logger.debug("No se pudo registrar filtro de ruido de IQOption API: %s", exc)
 
 
 class LogHandlerGUI(logging.Handler):
@@ -690,9 +699,11 @@ class AIEngineContinuous:
                 getattr(
                     self.config,
                     "UMBRAL_IA_DIRECCION",
-                    getattr(self.config, "UMBRAL_COMPRA", 85.0)
+                    getattr(self.config, "UMBRAL_COMPRA", 92.0)
                 )
             )
+            # Semana 1 (Crítico): umbral mínimo duro de 92% para entradas IA
+            UMBRAL_OPERACION = max(92.0, UMBRAL_OPERACION)
 
             direccion = None
             confidence = confidence_raw
@@ -965,6 +976,22 @@ class AIEngineContinuous:
                 )
                 return
 
+            # 5️⃣ Doble confirmación de feedback (Semana 2)
+            # Confirmación A: coherencia de trade_id cuando existe contexto pendiente
+            pending_id = getattr(self, "_pending_trade_id", None)
+            if pending_id is not None and trade_id is not None and int(pending_id) != int(trade_id):
+                self.logger.warning(
+                    f"[IA] ⚠️ Feedback rechazado por desalineación de trade_id (pending={pending_id}, recibido={trade_id})"
+                )
+                return
+
+            # Confirmación B: dirección recibida debe coincidir con dirección contextual
+            if direction and self._last_direction and direction.upper() != self._last_direction:
+                self.logger.warning(
+                    f"[IA] ⚠️ Feedback rechazado por dirección inconsistente (ctx={self._last_direction}, feedback={direction.upper()})"
+                )
+                return
+
             try:
                 # ==================================================
                 # 🎯 TARGET REAL PARA BINARIAS
@@ -1017,6 +1044,26 @@ class AIEngineContinuous:
             self._last_direction = direction
             self._pending_trade_id = trade_id
 
+    def _batch_quality_ok(self, X: np.ndarray, y: np.ndarray) -> Tuple[bool, str]:
+        """Filtro de calidad para entrenamiento por batch (evita ruido extremo)."""
+        try:
+            n = int(len(y))
+            if n < int(self.batch_size):
+                return False, "batch_insuficiente"
+            pos = int(np.sum(y == 1))
+            neg = int(np.sum(y == 0))
+            min_por_clase = int(getattr(self.config, "AI_BATCH_MIN_CLASS_SAMPLES", 1) or 1)
+            if pos < min_por_clase or neg < min_por_clase:
+                return False, f"desbalance_extremo_pos={pos}_neg={neg}"
+            # Validar varianza mínima de features para evitar entrenar sobre lotes planos
+            var_prom = float(np.nanmean(np.var(X, axis=0))) if X.size else 0.0
+            min_var = float(getattr(self.config, "AI_BATCH_MIN_FEATURE_VAR", 1e-8) or 1e-8)
+            if not np.isfinite(var_prom) or var_prom < min_var:
+                return False, f"varianza_baja={var_prom:.2e}"
+            return True, "ok"
+        except Exception as e:
+            return False, f"quality_error:{e}"
+
     def _execute_batch_learning(self):
         """
         Entrenamiento REAL con resultados acumulados.
@@ -1033,6 +1080,12 @@ class AIEngineContinuous:
                 X = X.reshape(1, -1)
             elif len(X.shape) == 3:
                 X = X.reshape(X.shape[0], -1)
+
+            quality_ok, quality_reason = self._batch_quality_ok(X, y)
+            if not quality_ok:
+                self.logger.warning(f"⚠️ Batch IA descartado por calidad: {quality_reason}")
+                self.trade_buffer.clear()
+                return
 
             # Primera vez → ajustar scaler y modelo
             if not self._is_initialized:
@@ -1162,7 +1215,129 @@ class IndicatorsPropios:
             if b2c < b1c and b2g > b1g:
                 bull = True
                 bull_bars = len(c) - p2
-        return {'bullish': bull, 'bearish': bear, 'bull_bars': bull_bars, 'bear_bars': bear_bars}
+        contexto = 'NEUTRAL'
+        if bull and bull_bars is not None:
+            contexto = 'BULLISH_FRESCA' if bull_bars <= 8 else 'BULLISH_TARDIA'
+        elif bear and bear_bars is not None:
+            contexto = 'BEARISH_FRESCA' if bear_bars <= 8 else 'BEARISH_TARDIA'
+        return {'bullish': bull, 'bearish': bear, 'bull_bars': bull_bars, 'bear_bars': bear_bars, 'contexto_temporal': contexto}
+    @staticmethod
+    def RFI_ZONAS(df: pd.DataFrame, impulso_mult_atr: float = 1.2,
+                  zona_atr_mult: float = 0.5, ema_fast: int = 21,
+                  ema_slow: int = 50) -> dict:
+        """Detecta zonas RFI de impulso comprador/vendedor y estado activo."""
+        try:
+            if df is None or len(df) < 60:
+                return {
+                    'direccion': 'NEUTRAL',
+                    'score': 0.0,
+                    'zona_compra_activa': False,
+                    'zona_venta_activa': False,
+                    'zonas': [],
+                    'circulos': []
+                }
+
+            o = df['open'].astype(float)
+            h = df['high'].astype(float)
+            l = df['low'].astype(float)
+            c = df['close'].astype(float)
+            atr = _atr_series(h, l, c, 14).fillna(method='bfill').fillna(0.0)
+            atr_last = float(atr.iloc[-1] or 0.0)
+            if atr_last <= 0:
+                atr_last = float((h.tail(20).max() - l.tail(20).min()) / 20.0)
+
+            cuerpo = (c - o).abs()
+            impulso = cuerpo > (atr * float(max(0.5, impulso_mult_atr)))
+
+            zonas = []
+            for i in range(max(5, len(df) - 80), len(df) - 1):
+                if not bool(impulso.iloc[i]):
+                    continue
+                dir_imp = 'CALL' if c.iloc[i] > o.iloc[i] else 'PUT'
+                z = float(max(atr.iloc[i], atr_last) * float(max(0.2, zona_atr_mult)))
+                if dir_imp == 'CALL':
+                    zl = float(l.iloc[i] - z * 0.15)
+                    zh = float(l.iloc[i] + z)
+                else:
+                    zl = float(h.iloc[i] - z)
+                    zh = float(h.iloc[i] + z * 0.15)
+                zonas.append({
+                    'idx': int(i),
+                    'direccion': dir_imp,
+                    'low': min(zl, zh),
+                    'high': max(zl, zh)
+                })
+
+            precio = float(c.iloc[-1])
+            zona_buy_activa = False
+            zona_sell_activa = False
+            ult_buy = None
+            ult_sell = None
+            for z in reversed(zonas):
+                if z['direccion'] == 'CALL' and ult_buy is None:
+                    ult_buy = z
+                if z['direccion'] == 'PUT' and ult_sell is None:
+                    ult_sell = z
+                if ult_buy and ult_sell:
+                    break
+
+            if ult_buy is not None and ult_buy['low'] <= precio <= ult_buy['high']:
+                zona_buy_activa = True
+            if ult_sell is not None and ult_sell['low'] <= precio <= ult_sell['high']:
+                zona_sell_activa = True
+
+            ema_f = IndicatorsPropios.EMA(c, ema_fast).iloc[-1]
+            ema_s = IndicatorsPropios.EMA(c, ema_slow).iloc[-1]
+            trend = 'CALL' if ema_f > ema_s else ('PUT' if ema_f < ema_s else 'NEUTRAL')
+
+            direccion = 'NEUTRAL'
+            if zona_buy_activa and not zona_sell_activa:
+                direccion = 'CALL'
+            elif zona_sell_activa and not zona_buy_activa:
+                direccion = 'PUT'
+            elif trend in ('CALL', 'PUT'):
+                direccion = trend
+
+            score = 0.0
+            if direccion in ('CALL', 'PUT'):
+                score = 55.0
+                if (direccion == trend):
+                    score += 20.0
+                if (zona_buy_activa or zona_sell_activa):
+                    score += 15.0
+                if atr_last > 0:
+                    score += min(10.0, float(cuerpo.tail(3).mean() / atr_last) * 3.0)
+                score = max(0.0, min(100.0, score))
+
+            circulos = []
+            for z in zonas[-5:]:
+                circulos.append({
+                    'tipo': 'BUY_ZONE' if z['direccion'] == 'CALL' else 'SELL_ZONE',
+                    'precio': float((z['low'] + z['high']) / 2.0),
+                    'activo': bool((z['direccion'] == 'CALL' and zona_buy_activa) or (z['direccion'] == 'PUT' and zona_sell_activa))
+                })
+
+            flecha = '↑' if direccion == 'CALL' else ('↓' if direccion == 'PUT' else '•')
+            return {
+                'direccion': direccion,
+                'score': float(score),
+                'zona_compra_activa': bool(zona_buy_activa),
+                'zona_venta_activa': bool(zona_sell_activa),
+                'trend': trend,
+                'flecha': flecha,
+                'zonas': zonas[-10:],
+                'circulos': circulos
+            }
+        except Exception:
+            return {
+                'direccion': 'NEUTRAL',
+                'score': 0.0,
+                'zona_compra_activa': False,
+                'zona_venta_activa': False,
+                'zonas': [],
+                'circulos': []
+            }
+
     @staticmethod
     def get_analysis_pack(df: pd.DataFrame) -> dict:
         """
@@ -1183,6 +1358,7 @@ class IndicatorsPropios:
         # TDI
         tdi_data = IndicatorsPropios.TDI(df)
         div = IndicatorsPropios.TDI_DIVERGENCIA(df)
+        rfi = IndicatorsPropios.RFI_ZONAS(df)
         return {
             'precio': precio_actual,
             'ema_21': ema_21,
@@ -1196,7 +1372,8 @@ class IndicatorsPropios:
             'tdi_div_bull': div.get('bullish', False),
             'tdi_div_bear': div.get('bearish', False),
             'tdi_div_bull_bars': div.get('bull_bars'),
-            'tdi_div_bear_bars': div.get('bear_bars')
+            'tdi_div_bear_bars': div.get('bear_bars'),
+            'rfi': rfi
         }
 
 
@@ -1683,7 +1860,52 @@ class MotorTradingIntegrado:
             getattr(
                 config,
                 "UMBRAL_TECNICO_DIRECCION",
-                75.0) or 75.0)
+                92.0) or 92.0)
+
+    def _filtro_spread_ok(self, data: dict) -> Tuple[bool, str]:
+        try:
+            spread = float(data.get("spread", 0.0) or 0.0)
+            precio = float(data.get("precio", data.get("close", 0.0)) or 0.0)
+            spread_pct = float(data.get("spread_pct", 0.0) or 0.0)
+            if spread_pct <= 0 and spread > 0 and precio > 0:
+                spread_pct = (spread / precio) * 100.0
+            max_spread_pct = float(getattr(self.config, "MAX_SPREAD_PCT", 0.08) or 0.08)
+            if spread_pct > max_spread_pct:
+                return False, f"SPREAD_ALTO_{spread_pct:.4f}%>{max_spread_pct:.4f}%"
+            return True, "OK"
+        except Exception:
+            return True, "OK"
+
+    def _bloqueo_por_news(self) -> Tuple[bool, str]:
+        """Gestión simple de news económicas basada en agenda local de configuración."""
+        try:
+            if not bool(getattr(self.config, "NEWS_HABILITADO", True)):
+                return False, "NEWS_DESHABILITADO"
+            eventos = getattr(self.config, "NEWS_EVENTOS", []) or []
+            if not isinstance(eventos, list) or not eventos:
+                return False, "SIN_EVENTOS"
+            now = datetime.utcnow()
+            bloque_min = int(getattr(self.config, "NEWS_BLOQUEO_MINUTOS", 20) or 20)
+            impacto_min = int(getattr(self.config, "NEWS_IMPACTO_MINIMO", 2) or 2)
+            for ev in eventos:
+                if not isinstance(ev, dict):
+                    continue
+                impacto = int(ev.get("impacto", 1) or 1)
+                if impacto < impacto_min:
+                    continue
+                ts = ev.get("timestamp_utc")
+                if not ts:
+                    continue
+                try:
+                    tev = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).replace(tzinfo=None)
+                except Exception:
+                    continue
+                delta = abs((tev - now).total_seconds()) / 60.0
+                if delta <= bloque_min:
+                    return True, f"NEWS_BLOCK_{ev.get('titulo', 'evento')}"
+            return False, "OK"
+        except Exception:
+            return False, "OK"
 
     # ==========================================================
     # VALIDACIONES TÉCNICAS
@@ -1736,6 +1958,15 @@ class MotorTradingIntegrado:
         """
 
         nn_prediction = float(nn_prediction)
+
+        bloqueado_news, motivo_news = self._bloqueo_por_news()
+        if bloqueado_news:
+            return self._wait(motivo_news)
+
+        spread_ok, spread_reason = self._filtro_spread_ok(data if isinstance(data, dict) else {})
+        if not spread_ok:
+            return self._wait(spread_reason)
+
         ia_direccion = "CALL" if nn_prediction > 0 else (
             "PUT" if nn_prediction < 0 else None)
         ia_fuerza = max(0.0, min(100.0, abs(nn_prediction)))
@@ -1746,6 +1977,14 @@ class MotorTradingIntegrado:
 
         trend_ema = self.verificar_tendencia_ema_50_200(data)
         trend_tdi = self.verificar_tdi_signal(data)
+
+        # TPSpro RFI/LOGIC AI
+        rfi_data = data.get("rfi", {}) if isinstance(data, dict) else {}
+        rfi_dir = str((rfi_data or {}).get("direccion", "NEUTRAL")).upper()
+        try:
+            rfi_score = float((rfi_data or {}).get("score", 0.0) or 0.0)
+        except Exception:
+            rfi_score = 0.0
 
         # Score técnico granular (0-100)
         score_ema = 0.0
@@ -1779,6 +2018,24 @@ class MotorTradingIntegrado:
 
         tecnico_fuerza_base = score_ema + score_tdi
         tecnico_fuerza_base = max(0.0, min(100.0, tecnico_fuerza_base))
+
+        if bool(getattr(self.config, "RFI_HABILITADO", True)):
+            # Si RFI contradice IA, filtramos operación
+            if ia_direccion in ("CALL", "PUT") and rfi_dir in ("CALL", "PUT") and rfi_dir != ia_direccion:
+                return {
+                    "accion": "WAIT",
+                    "confianza": round(tecnico_fuerza_base, 2),
+                    "motivo": "RFI_DIRECCION_CONTRARIA",
+                    "ia_confianza": ia_fuerza,
+                    "tecnico_confianza": tecnico_fuerza_base,
+                    "ia_score": ia_score,
+                    "tecnico_score": 0.0,
+                    "rfi_direccion": rfi_dir,
+                    "rfi_score": rfi_score
+                }
+            # Bonus técnico cuando RFI confirma la dirección
+            if ia_direccion in ("CALL", "PUT") and rfi_dir == ia_direccion:
+                tecnico_fuerza_base = min(100.0, tecnico_fuerza_base + min(20.0, rfi_score * 0.20))
 
         w_ia = float(getattr(self.config, "PESO_NEURONAL", 0.60) or 0.60)
         w_tec = float(getattr(self.config, "PESO_TECNICO", 0.40) or 0.40)
@@ -1993,7 +2250,9 @@ class MotorTradingIntegrado:
                 "ia_confianza": ia_fuerza,
                 "tecnico_confianza": tecnico_score,
                 "ia_score": ia_score,
-                "tecnico_score": tecnico_score_signed
+                "tecnico_score": tecnico_score_signed,
+                "rfi_direccion": rfi_dir,
+                "rfi_score": rfi_score
             }
 
         # -------------------------
@@ -2001,7 +2260,8 @@ class MotorTradingIntegrado:
         # -------------------------
         confianza_final = (ia_fuerza * w_ia) + (tecnico_score * w_tec)
 
-        umbral_combinado_min = max(float(self.umbral_compra), 90.0)
+        umbral_prod_cfg = float(getattr(self.config, "UMBRAL_CONFIANZA_COMBINADA", 90.0) or 90.0)
+        umbral_combinado_min = max(float(self.umbral_compra), umbral_prod_cfg)
         if confianza_final < umbral_combinado_min:
             return {
                 "accion": "WAIT",
@@ -2010,7 +2270,9 @@ class MotorTradingIntegrado:
                 "ia_confianza": ia_fuerza,
                 "tecnico_confianza": tecnico_score,
                 "ia_score": ia_score,
-                "tecnico_score": tecnico_score_signed
+                "tecnico_score": tecnico_score_signed,
+                "rfi_direccion": rfi_dir,
+                "rfi_score": rfi_score
             }
 
         return {
@@ -2020,7 +2282,9 @@ class MotorTradingIntegrado:
             "ia_confianza": ia_fuerza,
             "tecnico_confianza": tecnico_score,
             "ia_score": ia_score,
-            "tecnico_score": tecnico_score_signed
+            "tecnico_score": tecnico_score_signed,
+            "rfi_direccion": rfi_dir,
+            "rfi_score": rfi_score
         }
 
     # ==========================================================
@@ -2051,7 +2315,7 @@ class MotorTradingIntegrado:
         if accion_5m in ("CALL", "PUT") and accion_5m == accion_1m == accion_15m:
             confianza_5m = float(res_5m.get("confianza", 0) or 0)
             umbral_confluencia = max(
-                float(getattr(self.config, "UMBRAL_SEÑAL_CONFIRMADA", 92.0) or 92.0),
+                float(getattr(self.config, "UMBRAL_CONFIANZA_COMBINADA", 90.0) or 90.0),
                 90.0
             )
             if confianza_5m < umbral_confluencia:
@@ -2068,6 +2332,17 @@ class MotorTradingIntegrado:
                 }
             motivo_orig = res_5m.get("motivo", "")
             res_5m["motivo"] = f"{motivo_orig} | CONFLUENCIA_COMPLETA_1M_5M_15M"
+            res_5m["mtf_confirmado"] = True
+            rfi_dir = str(res_5m.get("rfi_direccion", "NEUTRAL")).upper()
+            res_5m["scanner_plantilla"] = "PLANTILLA_TENDENCIA" if rfi_dir == accion_5m else "PLANTILLA_BASE"
+            if bool(getattr(self.config, "RFI_ALERTAS_HABILITADAS", True)):
+                try:
+                    rfi_score = float(res_5m.get("rfi_score", 0.0) or 0.0)
+                    if rfi_score >= 70.0:
+                        self.logger.info(
+                            f"🔔 ALERTA RFI+MTF {accion_5m} | score={rfi_score:.1f} | plantilla={res_5m['scanner_plantilla']}")
+                except Exception:
+                    pass
             return res_5m
         return {
             "accion": "WAIT",
@@ -2078,7 +2353,9 @@ class MotorTradingIntegrado:
             "tecnico_score": res_5m.get("tecnico_score", 0),
             "ia_confianza": res_5m.get("ia_confianza", 0),
             "tecnico_confianza": res_5m.get("tecnico_confianza", 0),
-            "patron_wm": res_5m.get("patron_wm")
+            "patron_wm": res_5m.get("patron_wm"),
+            "mtf_confirmado": False,
+            "scanner_plantilla": "SIN_PLANTILLA"
         }
 
     def calcular_senal_final(
@@ -2100,6 +2377,19 @@ class MotorTradingIntegrado:
             analysis = ind_tec.get_analysis_pack(df)
             if not analysis:
                 return self._wait("ANALISIS_FALLIDO")
+
+            # Estrategia RFI/LOGIC AI (zonas activas compradores-vendedores)
+            if bool(getattr(self.config, "RFI_HABILITADO", True)):
+                try:
+                    analysis["rfi"] = IndicatorsPropios.RFI_ZONAS(
+                        df,
+                        impulso_mult_atr=float(getattr(self.config, "RFI_IMPULSO_MULT_ATR", 1.2) or 1.2),
+                        zona_atr_mult=float(getattr(self.config, "RFI_ZONA_ATR_MULT", 0.5) or 0.5),
+                        ema_fast=int(getattr(self.config, "RFI_TREND_EMA_FAST", 21) or 21),
+                        ema_slow=int(getattr(self.config, "RFI_TREND_EMA_SLOW", 50) or 50),
+                    )
+                except Exception:
+                    pass
 
             # IA real
             nn_pred = 0.0
@@ -2409,6 +2699,7 @@ class ConfiguracionTrading:
         self.USAR_PARES_COMMODITIES = True
         self.USAR_PARES_INDICES = True
         self.USAR_DIGITALES = True
+        self.USAR_BINARIAS = True
 
         # ==========================================
         # DATOS Y VELAS
@@ -2429,7 +2720,7 @@ class ConfiguracionTrading:
 
         self.USAR_TF_1M = True
         self.USAR_TF_5M = True
-        self.USAR_TF_15M = True
+        self.USAR_TF_15M = False
         self.USAR_TF_30M = False
         self.UMBRAL_ALINEACION_TF = 92
         self.FILTRO_APRENDIZAJE_HABILITADO = True
@@ -2450,6 +2741,18 @@ class ConfiguracionTrading:
         self.WM_EXTREMO_DIST_ATR = 0.40
         self.WM_CONFIRM_BODY_ATR = 0.18
         self.WM_CONFIRM_NECK_ATR = 0.06
+
+        # ==========================================
+        # TPSpro RFI / LOGIC AI (zonas comprador-vendedor)
+        # ==========================================
+        self.RFI_HABILITADO = True
+        self.RFI_MTF_HABILITADO = True
+        self.RFI_IMPULSO_MULT_ATR = 1.2
+        self.RFI_ZONA_ATR_MULT = 0.5
+        self.RFI_ALERTAS_HABILITADAS = True
+        self.RFI_TREND_EMA_FAST = 21
+        self.RFI_TREND_EMA_SLOW = 50
+
 
         # ==========================================
         # ESCANEO Y CACHE
@@ -2516,11 +2819,29 @@ class ConfiguracionTrading:
         # ==========================================
         # UMBRALES DE SEÑALES
         # ==========================================
-        self.UMBRAL_SEÑAL_DESTACADA = 85.0
-        self.UMBRAL_SEÑAL_CONFIRMADA = 92.0
-        self.UMBRAL_COMPRA = 55.0
-        self.UMBRAL_IA_DIRECCION = 52.0
-        self.UMBRAL_TECNICO_DIRECCION = 50.0
+        self.UMBRAL_SEÑAL_DESTACADA = 82.0
+        self.UMBRAL_SEÑAL_CONFIRMADA = 90.0
+        self.UMBRAL_CONFIANZA_COMBINADA = 88.0
+        self.PERFIL_CONFIG_PRESET = "BALANCEADO"
+        self.UMBRAL_COMPRA = 92.0
+        self.UMBRAL_IA_DIRECCION = 92.0
+        self.UMBRAL_TECNICO_DIRECCION = 92.0
+        self.MAX_SPREAD_PCT = 0.08
+
+        # Gestión de news económicas (agenda local UTC)
+        self.NEWS_HABILITADO = True
+        self.NEWS_BLOQUEO_MINUTOS = 20
+        self.NEWS_IMPACTO_MINIMO = 2
+        self.NEWS_EVENTOS = []
+
+        # Calidad de aprendizaje por batch
+        self.AI_BATCH_MIN_CLASS_SAMPLES = 1
+        self.AI_BATCH_MIN_FEATURE_VAR = 1e-8
+
+        # Multi-timeframe ponderado
+        self.TF_WEIGHT_1M = 0.25
+        self.TF_WEIGHT_5M = 0.50
+        self.TF_WEIGHT_15M = 0.25
 
         # ==========================================
         # TRADING (BASE)
@@ -2531,6 +2852,9 @@ class ConfiguracionTrading:
         self.PORCENTAJE_INVERSION = 0.1
         self.MAX_OPERACIONES_SIMULTANEAS = 1
         self.TIEMPO_EXPIRACION = 5
+        self.AUTOAPRENDIZAJE_SOLO_WINS = True
+        self.AUTO_INICIAR_STREAMS_EN_CONEXION = False
+        self.MAX_STREAMS_INICIO = 8
         self.CAPITAL_INICIAL = 10.0
         self.LOTE_SIZE_ACTUAL = 1.0
         self.LOTE_SIZE_INICIAL = 1.0
@@ -2561,13 +2885,13 @@ class ConfiguracionTrading:
         self.REACTIVACION_AUTOMATICA = True
         self.STOP_LOSS_DIARIO = 20.0
         self.PAUSA_AL_STOP_LOSS = True
-        self.MAX_TRADES_POR_HORA = 4
-        self.MAX_TRADES_POR_DIA = 25
+        self.MAX_TRADES_POR_HORA = 6
+        self.MAX_TRADES_POR_DIA = 30
         self.AUTO_EJECUTAR_BROKER = False
-        self.AUTO_EJECUTAR_MIN_CONFIANZA = 85.0
+        self.AUTO_EJECUTAR_MIN_CONFIANZA = 84.0
         self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = 30
-        self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 240
-        self.COOLDOWN_POST_LOSS_SEC = 240
+        self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 120
+        self.COOLDOWN_POST_LOSS_SEC = 120
         self.AUTO_EJECUTAR_CONFIRMACIONES = 1
         self.AUTO_EJECUTAR_INTERVALO_VERIFICACION = 5
         self.RIESGO_POR_OPERACION = 0.02
@@ -2761,7 +3085,7 @@ class ConfiguracionTrading:
     # ==================================================
 
     def cargar_configuracion(self):
-        archivo = "IQ_Option 2.8.6.4_config.json"
+        archivo = "IQ_Option 2.8.7.4_config.json"
         if os.path.exists(archivo):
             try:
                 with open(archivo, "r", encoding="utf-8") as f:
@@ -2835,6 +3159,8 @@ class ConfiguracionTrading:
                     try:
                         self.UMBRAL_SEÑAL_CONFIRMADA = float(
                             data.get("UMBRAL_SEÑAL_CONFIRMADA", self.UMBRAL_SEÑAL_CONFIRMADA))
+                        self.UMBRAL_CONFIANZA_COMBINADA = float(
+                            data.get("UMBRAL_CONFIANZA_COMBINADA", getattr(self, "UMBRAL_CONFIANZA_COMBINADA", 90.0)))
                     except Exception:
                         self.UMBRAL_SEÑAL_CONFIRMADA = float(
                             getattr(self, "UMBRAL_SEÑAL_CONFIRMADA", 75.0))
@@ -2978,6 +3304,7 @@ class ConfiguracionTrading:
                     # Paper Trading mode
                     self.MODO_PAPER_TRADING = data.get(
                         "PAPER_TRADING", self.MODO_PAPER_TRADING)
+                    self.PERFIL_CONFIG_PRESET = str(data.get("PERFIL_CONFIG_PRESET", getattr(self, "PERFIL_CONFIG_PRESET", "BALANCEADO"))).upper()
 
                     logger.info(f"Configuración cargada desde {archivo}")
 
@@ -2985,7 +3312,7 @@ class ConfiguracionTrading:
                 print(f"Error cargando config desde {archivo}: {e}")
 
     def guardar_configuracion(self):
-        archivo = "IQ_Option 2.8.6.4_config.json"
+        archivo = "IQ_Option 2.8.7.4_config.json"
         try:
             # Cargar configuración existente para preservar otros campos
             data = {}
@@ -3027,13 +3354,15 @@ class ConfiguracionTrading:
                 "LOTE_SIZE_ACTUAL": self.LOTE_SIZE_ACTUAL,
                 "LOTE_SIZE_INICIAL": self.LOTE_SIZE_INICIAL,
                 "INTERES_COMPUESTO_ACTIVO": self.INTERES_COMPUESTO_ACTIVO,
+                "UMBRAL_CONFIANZA_COMBINADA": self.UMBRAL_CONFIANZA_COMBINADA,
                 "MAX_OPERACIONES_POR_SESION": self.MAX_OPERACIONES_POR_SESION,
                 "DIAS_HISTORICOS": self.DIAS_HISTORICOS,
                 "DIAS_HISTORICOS_COLDSTART": self.DIAS_HISTORICOS_COLDSTART,
                 "MAX_TRADES_SESION": self.MAX_TRADES_SESION,
                 "TIPO_CUENTA": self.TIPO_CUENTA,
                 "PAPER_TRADING": self.MODO_PAPER_TRADING,
-                "PARES_TRADING": self.PARES_TRADING
+                "PARES_TRADING": self.PARES_TRADING,
+                "PERFIL_CONFIG_PRESET": self.PERFIL_CONFIG_PRESET
             }
 
             data.update(updates)
@@ -3043,6 +3372,51 @@ class ConfiguracionTrading:
 
         except Exception as e:
             print(f"Error guardando config en {archivo}: {e}")
+
+    def aplicar_preset_configuracion(self, preset: str = "BALANCEADO"):
+        preset = str(preset or "BALANCEADO").upper()
+        presets = {
+            "BALANCEADO": {
+                "UMBRAL_CONFIANZA_COMBINADA": 88.0,
+                "UMBRAL_SEÑAL_DESTACADA": 82.0,
+                "UMBRAL_SEÑAL_CONFIRMADA": 90.0,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": 84.0,
+                "UMBRAL_IA_DIRECCION": 50.0,
+                "UMBRAL_TECNICO_DIRECCION": 48.0,
+                "FILTRO_WM_HABILITADO": False,
+                "MAX_TRADES_POR_HORA": 6,
+                "MAX_TRADES_POR_DIA": 30,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": 120,
+                "COOLDOWN_POST_LOSS_SEC": 120,
+                "MAX_OPERACIONES_SIMULTANEAS": 1,
+                "INTERES_COMPUESTO_ACTIVO": True,
+                "PORCENTAJE_INVERSION": 0.03
+            },
+            "AGRESIVO": {
+                "UMBRAL_CONFIANZA_COMBINADA": 86.0,
+                "UMBRAL_SEÑAL_DESTACADA": 80.0,
+                "UMBRAL_SEÑAL_CONFIRMADA": 88.0,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": 82.0,
+                "UMBRAL_IA_DIRECCION": 48.0,
+                "UMBRAL_TECNICO_DIRECCION": 46.0,
+                "FILTRO_WM_HABILITADO": False,
+                "MAX_TRADES_POR_HORA": 8,
+                "MAX_TRADES_POR_DIA": 40,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": 90,
+                "COOLDOWN_POST_LOSS_SEC": 90,
+                "MAX_OPERACIONES_SIMULTANEAS": 1,
+                "INTERES_COMPUESTO_ACTIVO": True,
+                "PORCENTAJE_INVERSION": 0.03
+            }
+        }
+        if preset not in presets:
+            preset = "BALANCEADO"
+        self.PERFIL_CONFIG_PRESET = preset
+        for k, v in presets[preset].items():
+            try:
+                setattr(self, k, v)
+            except Exception:
+                pass
 
     def cambiar_perfil(self, nuevo_perfil: str):
         if nuevo_perfil in ["REGULAR", "OTC"]:
@@ -3893,8 +4267,12 @@ class OperationsRepository:
                 alineacion_tf = trade.get('alineacion_tf')
             if not isinstance(alineacion_tf, dict):
                 alineacion_tf = None
-            if not exitoso:
+
+            # None significa operación pendiente (aún sin resultado)
+            if exitoso is None:
                 return
+
+            exitoso_bool = bool(exitoso)
             trade_record = {
                 'id': len(self.trades) + 1,
                 'timestamp': datetime.now().isoformat(),
@@ -3903,7 +4281,7 @@ class OperationsRepository:
                 'precio_entrada': trade.get('precio_entrada', 0),
                 'precio_salida': trade.get('precio_salida', 0),
                 'payout': trade.get('payout', 0.82),
-                'exitoso': exitoso,
+                'exitoso': exitoso_bool,
                 'ganancia': trade.get('ganancia', 0),
                 'alineacion_tf': alineacion_tf,
                 # Indicadores al momento del trade
@@ -4172,18 +4550,32 @@ class EnsemblePredictor:
                         'dir_nn': dir_nn
                     }
                 }
+            # Ajuste dinámico de peso histórico según volumen de datos
+            try:
+                stats = self.operations_repo.obtener_estadisticas()
+                total_hist = int(stats.get('total_trades', 0) or 0)
+            except Exception:
+                total_hist = 0
+            peso_hist_dinamico = min(0.30, self.peso_historico + (0.10 if total_hist >= 200 else 0.05 if total_hist >= 80 else 0.0))
+            peso_nn = max(0.20, self.peso_nn - (peso_hist_dinamico - self.peso_historico) * 0.5)
+            peso_ind = max(0.15, self.peso_indicadores - (peso_hist_dinamico - self.peso_historico) * 0.5)
+            peso_sum = max(1e-9, peso_hist_dinamico + peso_nn + peso_ind)
+            peso_hist_dinamico /= peso_sum
+            peso_nn /= peso_sum
+            peso_ind /= peso_sum
+
             # Combinar predicciones con pesos
             if dir_indicadores == 'CALL':
                 prob_final_call = (
-                    prob_indicadores * self.peso_indicadores +
-                    prob_historico_call * self.peso_historico +
-                    prob_nn * self.peso_nn
+                    prob_indicadores * peso_ind +
+                    prob_historico_call * peso_hist_dinamico +
+                    prob_nn * peso_nn
                 )
             else:
                 prob_final_call = (
-                    (1 - prob_indicadores) * self.peso_indicadores +
-                    prob_historico_call * self.peso_historico +
-                    prob_nn * self.peso_nn
+                    (1 - prob_indicadores) * peso_ind +
+                    prob_historico_call * peso_hist_dinamico +
+                    prob_nn * peso_nn
                 )
             # Normalizar
             prob_final_call = max(0.1, min(0.9, prob_final_call))
@@ -6402,7 +6794,7 @@ class EstrategiaMultiTimeframe:
             tecnico_pct = max(score_tecnico_call_norm, score_tecnico_put_norm)
             # Reglas de producción: dirección alineada + confianza combinada mínima 90%
             umbral_combinado_min = max(
-                float(getattr(self.config, 'UMBRAL_SEÑAL_CONFIRMADA', 92.0) or 92.0),
+                float(getattr(self.config, 'UMBRAL_CONFIANZA_COMBINADA', 90.0) or 90.0),
                 90.0
             )
             alineacion_direccion = str(señal).upper() == str(alineacion_tf.get('direccion', '')).upper()
@@ -7256,7 +7648,9 @@ class PaperTradingEngine:
 
         # 🔥 ENTRENAR IA
         if self.ai_engine:
-            self.ai_engine.learn_from_result(win, direccion)
+            solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True)) if hasattr(self, "config") else True
+            if (not solo_wins) or bool(win):
+                self.ai_engine.learn_from_result(win, direccion)
 
         return {
             'win': win,
@@ -7770,10 +8164,16 @@ class SeguimientoSenales:
 
         # Verificar condiciones
         if getattr(self.config, "KILL_SWITCH", False):
+            self.logger.info(
+                f"[AUTO-TRADE][{par}] Bloqueado por KILL_SWITCH=True")
             return
         if getattr(self.config, "PAUSADO_POR_OBJETIVO", False):
+            self.logger.info(
+                f"[AUTO-TRADE][{par}] Bloqueado por PAUSADO_POR_OBJETIVO=True")
             return
         if not getattr(self.config, "AUTO_TRADING_HABILITADO", False):
+            self.logger.info(
+                f"[AUTO-TRADE][{par}] Bloqueado por AUTO_TRADING_HABILITADO=False")
             return
 
         # Modo Paper Trading
@@ -7814,10 +8214,16 @@ class SeguimientoSenales:
 
         # Modo Producción
         if not getattr(self.config, "MODO_PRODUCCION", False):
+            self.logger.info(
+                f"[AUTO-TRADE][{par}] Bloqueado por MODO_PRODUCCION=False")
             return
         if getattr(self.config, "DRY_RUN", False):
+            self.logger.info(
+                f"[AUTO-TRADE][{par}] Bloqueado por DRY_RUN=True")
             return
         if not getattr(self.config, "AUTO_EJECUTAR_BROKER", False):
+            self.logger.info(
+                f"[AUTO-TRADE][{par}] Bloqueado por AUTO_EJECUTAR_BROKER=False")
             return
 
         # Verificar límites y cooldown
@@ -7832,6 +8238,8 @@ class SeguimientoSenales:
         cd_loss = int(getattr(self.config, "COOLDOWN_POST_LOSS_SEC", 0) or 0)
         if cd_loss > 0 and float(self._ultimo_loss_ts or 0) > 0:
             if (datetime.now().timestamp() - float(self._ultimo_loss_ts)) < cd_loss:
+                self.logger.debug(
+                    f"[AUTO-TRADE][{par}] Bloqueado por cooldown post-loss ({cd_loss}s)")
                 return
 
         max_hora = int(getattr(self.config, "MAX_TRADES_POR_HORA", 0) or 0)
@@ -7840,8 +8248,12 @@ class SeguimientoSenales:
                 ahora - self._trades_timestamps[0]).total_seconds() > 3600:
             self._trades_timestamps.popleft()
         if max_hora > 0 and len(self._trades_timestamps) >= max_hora:
+            self.logger.debug(
+                f"[AUTO-TRADE][{par}] Bloqueado: MAX_TRADES_POR_HORA alcanzado ({max_hora})")
             return
         if max_dia > 0 and int(self._trades_dia) >= max_dia:
+            self.logger.debug(
+                f"[AUTO-TRADE][{par}] Bloqueado: MAX_TRADES_POR_DIA alcanzado ({max_dia})")
             return
 
         cooldown_par = int(
@@ -7852,13 +8264,19 @@ class SeguimientoSenales:
         ultimo = self._ultimo_trade_por_par.get(par)
         if ultimo and cooldown_par > 0 and (
                 ahora - ultimo).total_seconds() < cooldown_par:
+            self.logger.debug(
+                f"[AUTO-TRADE][{par}] Bloqueado por cooldown de par ({cooldown_par}s)")
             return
 
         # Verificar conexión
         if not (getattr(self.iq_bridge, "connected", False)
                 and getattr(self.iq_bridge, "api", None)):
+            self.logger.warning(
+                f"[AUTO-TRADE][{par}] Bloqueado por conexión/API no disponible")
             return
         if not self.iq_bridge.verificar_activo_operable(par):
+            self.logger.warning(
+                f"[AUTO-TRADE][{par}] Bloqueado: activo no operable ahora")
             return
 
         # Calcular monto
@@ -7957,7 +8375,7 @@ class SeguimientoSenales:
                 if getattr(self, 'notificaciones', None) and getattr(self.notificaciones, 'telegram_notifier', None):
                     telegram = self.notificaciones.telegram_notifier
                 else:
-                    telegram = TelegramNotifier(self.config, self.iq_bridge)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self.iq_bridge)
                 telegram.enviar_resultado(
                     par,
                     senal.get('direccion', ''),
@@ -8002,8 +8420,10 @@ class SeguimientoSenales:
             if self.ai_engine:
                 if cumple_filtro_aprendizaje(self.config, senal.get("direccion"),
                                              senal.get("indicadores", {}) or {}):
-                    self.ai_engine.learn_from_result(
-                        is_win, senal.get("direccion"))
+                    solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True))
+                    if (not solo_wins) or bool(is_win):
+                        self.ai_engine.learn_from_result(
+                            is_win, senal.get("direccion"))
         except Exception as e:
             self.logger.error(
                 f"❌ Error enviando feedback a IA: {e}",
@@ -9085,7 +9505,16 @@ class IQOptionBridge:
         self._candles_streams = {}
         self._candles_callbacks = {}
         self._candles_event_queue = Queue(maxsize=5000)
+        # Control de memoria de streams/cola de velas
+        self._candles_queue_soft_limit = int(getattr(config, "CANDLES_QUEUE_SOFT_LIMIT", 3000) or 3000)
+        self._candles_queue_hard_limit = int(getattr(config, "CANDLES_QUEUE_HARD_LIMIT", 4500) or 4500)
+        self._candles_buffer_max_default = int(getattr(config, "CANDLES_BUFFER_MAX_PER_STREAM", 400) or 400)
+        self._candles_prune_interval_sec = float(getattr(config, "CANDLES_PRUNE_INTERVAL_SEC", 30.0) or 30.0)
+        self._candles_inactive_ttl_sec = float(getattr(config, "CANDLES_INACTIVE_TTL_SEC", 600.0) or 600.0)
+        self._last_candles_prune_ts = 0.0
         self._last_queue_relief_ts = 0.0
+        self._stream_retry_state = {}
+        self._stream_warn_throttle = {}
         self._candles_publisher_stop = threading.Event()
         self._candles_publisher_thread = None
         self._last_event_ts = 0.0
@@ -9360,12 +9789,16 @@ class IQOptionBridge:
                                 indicadores = pred.get("indicadores", {}) or {}
                             if cumple_filtro_aprendizaje(
                                     self.config, direccion, indicadores):
-                                self.ai_engine.learn_from_result(
-                                    float(beneficio) > 0, direccion)
-                    except Exception:
-                        pass
+                                is_win = float(beneficio) > 0
+                                solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True))
+                                if (not solo_wins) or is_win:
+                                    self.ai_engine.learn_from_result(
+                                        is_win, direccion, trade_id=order_id)
+                    except Exception as e:
+                        logger.debug(f"Error aplicando feedback IA para order_id={order_id}: {e}")
                     cerradas += 1
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Error reconciliando operación order_id={order_id}: {e}")
                     continue
 
             with self._state_lock:
@@ -9510,6 +9943,12 @@ class IQOptionBridge:
             if par.endswith("-OTC") and not self.config.USAR_PARES_OTC:
                 continue
             if not par.endswith("-OTC") and not self.config.USAR_PARES_FOREX:
+                continue
+
+            # Mantener pares solo si el tipo de opción está habilitado
+            usar_binarias = bool(getattr(self.config, "USAR_BINARIAS", True))
+            usar_digitales = bool(getattr(self.config, "USAR_DIGITALES", True))
+            if not (usar_binarias or usar_digitales):
                 continue
 
             pares_filtrados.append(par)
@@ -9838,26 +10277,72 @@ class IQOptionBridge:
             target=self._loop_publicador_velas, daemon=True)
         self._candles_publisher_thread.start()
 
+    def _permitir_reintento_stream(self, simbolo: str, timeframe_segundos: int) -> bool:
+        try:
+            key = f"{simbolo}:{int(timeframe_segundos)}"
+            now = time.time()
+            st = self._stream_retry_state.get(key, {})
+            next_ts = float(st.get("next_retry_ts", 0.0) or 0.0)
+            return now >= next_ts
+        except Exception:
+            return True
 
+    def _registrar_fallo_stream(self, simbolo: str, timeframe_segundos: int):
+        try:
+            key = f"{simbolo}:{int(timeframe_segundos)}"
+            now = time.time()
+            st = self._stream_retry_state.get(key, {})
+            fails = int(st.get("fails", 0) or 0) + 1
+            cooldown = min(300.0, float(2 ** min(fails, 8)))
+            self._stream_retry_state[key] = {
+                "fails": fails,
+                "next_retry_ts": now + cooldown
+            }
+        except Exception:
+            pass
+
+    def _registrar_exito_stream(self, simbolo: str, timeframe_segundos: int):
+        try:
+            key = f"{simbolo}:{int(timeframe_segundos)}"
+            if key in self._stream_retry_state:
+                self._stream_retry_state.pop(key, None)
+        except Exception:
+            pass
 
     def _iniciar_stream_velas_con_timeout(self, simbolo: str, timeframe_segundos: int,
                                          maxdict: int, timeout_s: float = 8.0) -> bool:
         """Inicia stream con timeout real para evitar bloqueos largos del hilo."""
         try:
+            if not self._permitir_reintento_stream(simbolo, timeframe_segundos):
+                return False
             timeout_s = float(max(3.0, timeout_s))
             ok = self._call_with_timeout(
                 self.api.start_candles_stream,
                 args=(simbolo, int(timeframe_segundos), int(maxdict)),
                 timeout=timeout_s,
             )
-            return bool(ok)
+            if bool(ok):
+                self._registrar_exito_stream(simbolo, timeframe_segundos)
+                return True
+            self._registrar_fallo_stream(simbolo, timeframe_segundos)
+            return False
         except TimeoutError:
             self._record_candles_timeout()
-            logger.warning(
-                f"⏱️ Tiempo de espera agotado ({int(timeout_s)}s) al iniciar stream de velas "
-                f"para {simbolo} [{int(timeframe_segundos)}s]")
+            self._registrar_fallo_stream(simbolo, timeframe_segundos)
+            try:
+                key = f"{simbolo}:{int(timeframe_segundos)}"
+                now = time.time()
+                last_warn = float(self._stream_warn_throttle.get(key, 0.0) or 0.0)
+                if now - last_warn >= 20.0:
+                    logger.warning(
+                        f"⏱️ Tiempo de espera agotado ({int(timeout_s)}s) al iniciar stream de velas "
+                        f"para {simbolo} [{int(timeframe_segundos)}s]")
+                    self._stream_warn_throttle[key] = now
+            except Exception:
+                pass
             return False
         except Exception as e:
+            self._registrar_fallo_stream(simbolo, timeframe_segundos)
             logger.debug(
                 f"Error iniciando stream de velas para {simbolo} [{int(timeframe_segundos)}s]: {e}")
             return False
@@ -9893,6 +10378,56 @@ class IQOptionBridge:
                     pass
         except Exception:
             pass
+
+    def _aplicar_control_memoria_streams(self) -> None:
+        """Controla crecimiento de cola y buffers de velas para evitar uso excesivo de RAM."""
+        try:
+            qsize = int(self._candles_event_queue.qsize())
+        except Exception:
+            qsize = 0
+
+        # Alivio temprano de cola
+        try:
+            if qsize >= int(self._candles_queue_soft_limit):
+                target = int(max(1000, self._candles_queue_soft_limit * 0.70))
+                while self._candles_event_queue.qsize() > target:
+                    try:
+                        self._candles_event_queue.get_nowait()
+                    except Exception:
+                        break
+        except Exception:
+            pass
+
+        # Reducción adaptativa de buffers por stream bajo presión alta
+        if qsize < int(self._candles_queue_hard_limit):
+            return
+
+        with self._candles_stream_lock:
+            for sk, st in self._candles_streams.items():
+                buf = st.get("buffer_velas")
+                if not isinstance(buf, deque) or len(buf) <= 100:
+                    continue
+                reduced_max = min(int(st.get("maxdict", 200)), 150)
+                reduced_max = max(80, reduced_max)
+                if buf.maxlen is None or buf.maxlen > reduced_max:
+                    st["buffer_velas"] = deque(list(buf)[-reduced_max:], maxlen=reduced_max)
+                    st["maxdict"] = reduced_max
+
+    def _prunar_streams_inactivos(self) -> None:
+        now = time.time()
+        if (now - float(getattr(self, "_last_candles_prune_ts", 0.0))) < float(self._candles_prune_interval_sec):
+            return
+        self._last_candles_prune_ts = now
+
+        with self._candles_stream_lock:
+            for sk, st in list(self._candles_streams.items()):
+                callbacks = st.get("callbacks") or {}
+                last_activity = float(st.get("last_activity_ts", now))
+                inactive = (now - last_activity) >= float(self._candles_inactive_ttl_sec)
+                if (not callbacks) and inactive:
+                    # mantener stream, pero liberar buffer agresivamente
+                    st["buffer_velas"] = deque(maxlen=min(60, int(st.get("maxdict", 60))))
+                    st["last_emitted"] = 0
 
     def _loop_publicador_velas(self):
         while not self._candles_publisher_stop.is_set():
@@ -9939,6 +10474,7 @@ class IQOptionBridge:
                         if stream_key in self._candles_streams:
                             self._candles_streams[stream_key]["last_emitted"] = last_emitted
 
+                self._prunar_streams_inactivos()
                 time.sleep(0.2)
             except Exception:
                 time.sleep(0.5)
@@ -9953,6 +10489,22 @@ class IQOptionBridge:
 
         if isinstance(buffer_velas, deque):
             buffer_velas.append(vela)
+
+        try:
+            with self._candles_stream_lock:
+                if stream_key in self._candles_streams:
+                    self._candles_streams[stream_key]["last_activity_ts"] = time.time()
+        except Exception:
+            pass
+
+        # Si no hay callbacks registrados, evitar inflar cola innecesariamente
+        if not callbacks:
+            try:
+                qsize_now = int(self._candles_event_queue.qsize())
+                if qsize_now >= 200:
+                    return
+            except Exception:
+                pass
 
         evento = {
             "stream_id": stream_key,
@@ -9986,6 +10538,7 @@ class IQOptionBridge:
             pass
 
         try:
+            self._aplicar_control_memoria_streams()
             self._candles_event_queue.put_nowait(evento)
         except Exception:
             try:
@@ -10013,7 +10566,7 @@ class IQOptionBridge:
                 self.api, "get_realtime_candles"):
             return None
 
-        maxdict = int(max(50, maxdict))
+        maxdict = int(max(50, min(maxdict, self._candles_buffer_max_default)))
         stream_key = f"{simbolo}:{int(timeframe_segundos)}"
 
         with self._candles_stream_lock:
@@ -10060,6 +10613,7 @@ class IQOptionBridge:
                     "last_emitted": 0,
                     "buffer_velas": deque(maxlen=maxdict),
                     "callbacks": {},
+                    "last_activity_ts": time.time(),
                 }
         else:
             prev_maxdict = int(stream_state.get("maxdict", 50))
@@ -10115,8 +10669,8 @@ class IQOptionBridge:
                         break
                     time.sleep(0.5)
                 if ok is False:
-                    logging.warning(
-                        f"No se pudo resuscribir stream para {simbolo}")
+                    logger.debug(
+                        f"No se pudo resuscribir stream para {simbolo} (en cooldown/reintento)")
                     continue
             except Exception:
                 continue
@@ -10151,6 +10705,7 @@ class IQOptionBridge:
         with self._candles_stream_lock:
             if stream_key in self._candles_streams:
                 self._candles_streams[stream_key]["callbacks"][subscription_id] = callback
+                self._candles_streams[stream_key]["last_activity_ts"] = time.time()
                 self._candles_callbacks[subscription_id] = stream_key
 
         return subscription_id
@@ -10281,7 +10836,7 @@ class IQOptionBridge:
                         maxlen=maxdict_stream)
                     self._candles_streams[stream_key]["last_emitted"] = 0
             try:
-                self.api.start_candles_stream(
+                self._iniciar_stream_velas_con_timeout(
                     simbolo, int(timeframe_segundos), maxdict_stream)
             except Exception:
                 pass
@@ -10437,9 +10992,24 @@ class IQOptionBridge:
         base_delay = 2
         delay = base_delay
 
+        creds = self._cargar_credenciales()
+        if (not isinstance(creds, tuple)) or len(creds) < 2:
+            logger.error("❌ Reconexión abortada: formato de credenciales inválido")
+            self.connected = False
+            return False
+
         for attempt in range(max_retries):
             try:
                 logger.info(f"▶ Intento de reconexión {attempt + 1}/{max_retries}...")
+
+                # Refrescar credenciales en cada intento (archivo/env pueden cambiar en caliente)
+                cred_try = self._cargar_credenciales()
+                iq_email = (cred_try[0] if isinstance(cred_try, tuple) and len(cred_try) > 0 else None)
+                iq_password = (cred_try[1] if isinstance(cred_try, tuple) and len(cred_try) > 1 else None)
+                if not iq_email or not iq_password:
+                    logger.error("❌ Reconexión abortada: credenciales IQ Option no disponibles")
+                    self.connected = False
+                    return False
 
                 # 1. Cerrar conexión actual si existe
                 if hasattr(self, 'api') and self.api and hasattr(self.api, 'close'):
@@ -10455,7 +11025,7 @@ class IQOptionBridge:
                 time.sleep(1.5)  # Breve pausa para evitar race condition
 
                 # 3. Crear nueva instancia
-                self.api = IQ_Option_Stable(EMAIL, PASSWORD)
+                self.api = IQ_Option_Stable(iq_email, iq_password)
                 logger.debug("✓ Nueva instancia de API creada.")
                 self._parchear_atributos_ws_iqoptionapi()
                 try:
@@ -10560,9 +11130,17 @@ class IQOptionBridge:
         # Helper para verificar si un par está abierto (Binary/Turbo cubren
         # 1m/5m/15m)
         def es_activo_valido(par):
-            for mercado in ("binary", "turbo"):
-                info = open_time_info.get(mercado, {}).get(par)
-                if info and (info.get("open") or info.get("is_open")):
+            usar_binarias = bool(getattr(self.config, "USAR_BINARIAS", True))
+            usar_digitales = bool(getattr(self.config, "USAR_DIGITALES", True))
+
+            if usar_binarias:
+                for mercado in ("binary", "turbo"):
+                    info = open_time_info.get(mercado, {}).get(par)
+                    if info and (info.get("open") or info.get("is_open")):
+                        return True
+            if usar_digitales:
+                info_d = open_time_info.get("digital", {}).get(par)
+                if info_d and (info_d.get("open") or info_d.get("is_open")):
                     return True
             return False
 
@@ -10586,7 +11164,7 @@ class IQOptionBridge:
             candidatos_forex = set()
             candidatos_otc = set()
 
-            for mercado in ("binary", "turbo"):
+            for mercado in ("binary", "turbo", "digital"):
                 for par, info in open_time_info.get(mercado, {}).items():
                     if info and (info.get("open") or info.get("is_open")):
                         if "OTC" in par:
@@ -10628,6 +11206,7 @@ class IQOptionBridge:
 
         # 6. Guardar si hubo cambios
         if cambios or set(pares_validos) != set(pares_actuales):
+            self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
             self.config.guardar_configuracion()
             logger.info(
                 f"💾 Configuración guardada y sincronizada: {len(pares_validos)} pares activos.")
@@ -10705,16 +11284,27 @@ class IQOptionBridge:
             # 3. FUNCIÓN DE VERIFICACIÓN (Turbo & Binary)
             # ---------------------------------------------------------
             def verificar_habilitado(nombre_par: str) -> bool:
-                # Verificar Binary (para 15m)
-                bin_info = open_time_data.get("binary", {}).get(nombre_par)
-                if isinstance(bin_info, dict) and (
-                        bin_info.get("open") or bin_info.get("is_open")):
-                    return True
-                # Verificar Turbo (para 1m/5m)
-                turbo_info = open_time_data.get("turbo", {}).get(nombre_par)
-                if isinstance(turbo_info, dict) and (
-                        turbo_info.get("open") or turbo_info.get("is_open")):
-                    return True
+                usar_binarias = bool(getattr(self.config, "USAR_BINARIAS", True))
+                usar_digitales = bool(getattr(self.config, "USAR_DIGITALES", True))
+
+                # Binary/Turbo cubren 1m/5m/15m para binarias
+                if usar_binarias:
+                    bin_info = open_time_data.get("binary", {}).get(nombre_par)
+                    if isinstance(bin_info, dict) and (
+                            bin_info.get("open") or bin_info.get("is_open")):
+                        return True
+                    turbo_info = open_time_data.get("turbo", {}).get(nombre_par)
+                    if isinstance(turbo_info, dict) and (
+                            turbo_info.get("open") or turbo_info.get("is_open")):
+                        return True
+
+                # Digitales habilitadas
+                if usar_digitales:
+                    dig_info = open_time_data.get("digital", {}).get(nombre_par)
+                    if isinstance(dig_info, dict) and (
+                            dig_info.get("open") or dig_info.get("is_open")):
+                        return True
+
                 return False
 
             # ---------------------------------------------------------
@@ -10723,7 +11313,8 @@ class IQOptionBridge:
             lista_final = []
             keys_api_turbo = list(open_time_data.get("turbo", {}).keys())
             keys_api_binary = list(open_time_data.get("binary", {}).keys())
-            all_api_keys = set(keys_api_turbo + keys_api_binary)
+            keys_api_digital = list(open_time_data.get("digital", {}).keys())
+            all_api_keys = set(keys_api_turbo + keys_api_binary + keys_api_digital)
 
             for par_objetivo in lista_prioridad:
                 par_a_usar = None
@@ -10788,7 +11379,7 @@ class IQOptionBridge:
                 return []
 
             abiertos = set()
-            for mercado in ("binary", "turbo"):
+            for mercado in ("binary", "turbo", "digital"):
                 pares = open_time_info.get(mercado, {})
                 if not isinstance(pares, dict):
                     continue
@@ -11031,9 +11622,13 @@ class IQOptionBridge:
                         pares_activos = getattr(
                             self.config, 'PARES_TRADING', [])
 
-                        if pares_activos:
-                            # Limitar a top 20 pares para evitar bloqueo
-                            pares_stream = pares_activos[:20]
+                        auto_streams = bool(getattr(self.config, "AUTO_INICIAR_STREAMS_EN_CONEXION", False))
+                        if pares_activos and auto_streams:
+                            # Limitar streams iniciales para evitar freeze durante arranque/cold-start
+                            max_streams = int(getattr(self.config, "MAX_STREAMS_INICIO", 8) or 8)
+                            if max_streams <= 0:
+                                max_streams = 8
+                            pares_stream = pares_activos[:max_streams]
                             logger.info(
                                 f"⚡ Activando streams de velas para {len(pares_stream)} pares (TF: {tf_str})...")
                             for par in pares_stream:
@@ -11043,6 +11638,9 @@ class IQOptionBridge:
                                     pass
                             logger.info(
                                 "✅ Streams de velas activados correctamente")
+                        elif pares_activos and not auto_streams:
+                            logger.info(
+                                "⏸️ Auto streams en conexión deshabilitado (se activarán bajo demanda)")
                         else:
                             logger.warning(
                                 "⚠️ No hay pares configurados para suscribir a streams")
@@ -12752,14 +13350,21 @@ class IQOptionBridge:
                 res_confluencia = self.motor_trading.validar_confluencia_timeframes(
                      df_1m, df_5m, df_15m, expiracion_segundos=300
                 )
-                
-                accion_multi = res_confluencia.get('accion', 'WAIT')
+
+                accion_multi = str(res_confluencia.get('accion', 'WAIT')).upper()
                 if accion_multi in ('CALL', 'PUT'):
                      alineacion_tf['alineado'] = True
                      alineacion_tf['direccion'] = accion_multi
                      alineacion_tf['confianza'] = res_confluencia.get('confianza', 0.0) / 100.0
                      alineacion_tf['tf_1m'] = 'OK'
-                     
+
+            # Requisito estricto: operar solo con alineación 1m/5m/15m
+            if not alineacion_tf['alineado']:
+                return {
+                    'ejecutado': False,
+                    'razon': 'timeframes_no_alineados_1m_5m_15m'
+                }
+
             # Generar prediccion combinada (IA + Market Maker)
             prediccion = self.ensemble_predictor.predecir_con_market_maker(
                 df=df_5m,
@@ -12842,6 +13447,14 @@ class IQOptionBridge:
                     "CALL", "PUT") or direccion_tecnica != ia_dir:
                 return {'ejecutado': False,
                         'razon': 'direccion_no_coincide', 'prediccion': prediccion}
+            if str(alineacion_tf.get('direccion', 'NEUTRAL')).upper() != str(ia_dir).upper():
+                return {'ejecutado': False,
+                        'razon': 'desalineacion_multi_tf_ia_tecnico', 'prediccion': prediccion}
+
+            tendencia_val = float((indicadores or {}).get('tendencia', 0) or 0)
+            if (ia_dir == 'CALL' and tendencia_val < 0) or (ia_dir == 'PUT' and tendencia_val > 0):
+                return {'ejecutado': False,
+                        'razon': 'tendencia_contraria', 'prediccion': prediccion}
             if ia_conf < umbral_ia:
                 return {'ejecutado': False, 'razon': 'ia_bajo_umbral',
                         'prediccion': prediccion}
@@ -12898,9 +13511,12 @@ class IQOptionBridge:
                 f"🚀 Intentando operación en {simbolo}: {direccion_final} ${monto_final}")
 
             check, order_id = False, None
+            expiracion_min = int(getattr(self.config, "TIEMPO_EXPIRACION", 5) or 5)
+            if expiracion_min <= 0:
+                expiracion_min = 5
             try:
                 check, order_id = self.api.buy(
-                    monto_final, simbolo, direccion_final, 1)  # Expiración 1 min
+                    monto_final, simbolo, direccion_final, expiracion_min)
             except Exception as e:
                 logger.error(f"Fallo al ejecutar Binaria: {e}")
 
@@ -12910,7 +13526,7 @@ class IQOptionBridge:
                     "Binaria no disponible o fallida, intentando Digital Spot...")
                 try:
                     check, order_id = self.api.buy_digital_spot(
-                        simbolo, monto_final, direccion_final.lower(), 1)
+                        simbolo, monto_final, direccion_final.lower(), expiracion_min)
                 except Exception as e:
                     logger.error(f"Fallo al ejecutar Digital: {e}")
 
@@ -12919,7 +13535,22 @@ class IQOptionBridge:
                 self._trades_timestamps.append(datetime.now())
 
                 self.abrir_operacion(
-                    order_id, simbolo, direccion_final, monto_final, 1)
+                    order_id, simbolo, direccion_final, monto_final, expiracion_min)
+
+                # Sincronizar contexto IA con el order_id real para evitar
+                # desalineación entre predicción y feedback de resultado.
+                try:
+                    if self.ai_engine and hasattr(self.ai_engine, "register_trade_context"):
+                        feats = getattr(self.ai_engine, "_last_features", None)
+                        if feats is not None:
+                            self.ai_engine.register_trade_context(
+                                feats.copy() if hasattr(feats, "copy") else feats,
+                                direccion_final,
+                                int(order_id),
+                            )
+                except Exception as e:
+                    logger.debug(f"No se pudo registrar contexto IA de trade {order_id}: {e}")
+
                 logger.info(f"✅ Operación exitosa: ID {order_id}")
 
                 # Guardar resultado (simulado al abrir, se actualizará al
@@ -12996,7 +13627,7 @@ class IQOptionBridge:
             # Enviar resultado a Telegram
             if self.config.TELEGRAM_HABILITADO:
                 try:
-                    telegram = TelegramNotifier(self.config, self)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self)
                     telegram.enviar_resultado(
                         operacion.get('simbolo', ''),
                         operacion.get('direccion', ''),
@@ -13170,11 +13801,16 @@ class IQOptionBridge:
                 return resultado
 
             if exigir_15m:
-                confianza_combo = (tf_5m_confianza * 0.5) + \
-                    (tf_1m_confianza * 0.25) + (tf_15m_confianza * 0.25)
+                w1 = float(getattr(self.config, "TF_WEIGHT_1M", 0.25) or 0.25)
+                w5 = float(getattr(self.config, "TF_WEIGHT_5M", 0.50) or 0.50)
+                w15 = float(getattr(self.config, "TF_WEIGHT_15M", 0.25) or 0.25)
+                wsum = max(1e-9, w1 + w5 + w15)
+                confianza_combo = ((tf_1m_confianza * w1) + (tf_5m_confianza * w5) + (tf_15m_confianza * w15)) / wsum
             else:
-                confianza_combo = (tf_5m_confianza * 0.6) + \
-                    (tf_1m_confianza * 0.4)
+                w1 = float(getattr(self.config, "TF_WEIGHT_1M", 0.40) or 0.40)
+                w5 = float(getattr(self.config, "TF_WEIGHT_5M", 0.60) or 0.60)
+                wsum = max(1e-9, w1 + w5)
+                confianza_combo = ((tf_1m_confianza * w1) + (tf_5m_confianza * w5)) / wsum
             umbral = self.config.UMBRAL_ALINEACION_TF / 100.0
             resultado['direccion'] = direccion_ejecucion
             resultado['confianza'] = float(confianza_combo)
@@ -14409,7 +15045,7 @@ class TradingManager:
             # Notificar por Telegram si está habilitado
             if self.config.TELEGRAM_HABILITADO:
                 try:
-                    telegram = TelegramNotifier(self.config, self.iq_bridge)
+                    telegram = obtener_telegram_notifier_compartido(self.config, self.iq_bridge)
                     telegram.enviar_resultado(
                         simbolo,
                         direccion,
@@ -14527,7 +15163,7 @@ class TradingManager:
                 # Enviar notificación de señal destacada a Telegram
                 if self.config.TELEGRAM_HABILITADO:
                     try:
-                        telegram = TelegramNotifier(
+                        telegram = obtener_telegram_notifier_compartido(
                             self.config, self.iq_bridge)
                         umbral_confirmada = float(
                             getattr(
@@ -16284,6 +16920,21 @@ class TelegramNotifier:
 # ========== SISTEMA DE NOTIFICACIONES ORQUESTADO ==========
 # CAPITULO 27:
 # ==================================================
+
+
+def obtener_telegram_notifier_compartido(config, iq_bridge=None):
+    """Retorna/crea un TelegramNotifier compartido para mantener estado de secuencia."""
+    try:
+        if iq_bridge is not None:
+            existente = getattr(iq_bridge, 'telegram_notifier', None)
+            if existente is not None:
+                return existente
+        notifier = TelegramNotifier(config, iq_bridge)
+        if iq_bridge is not None:
+            setattr(iq_bridge, 'telegram_notifier', notifier)
+        return notifier
+    except Exception:
+        return TelegramNotifier(config, iq_bridge)
 
 
 class SistemaNotificaciones:
@@ -18060,6 +18711,18 @@ class ConfiguracionDialog(QDialog):
             "Umbral Señal Confirmada:",
             self.umbral_confirmada)
 
+        self.combo_preset = QComboBox()
+        self.combo_preset.addItems(["BALANCEADO", "AGRESIVO"])
+        self.combo_preset.setCurrentText(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
+        btn_aplicar_preset = QPushButton("Aplicar preset")
+        btn_aplicar_preset.clicked.connect(self._aplicar_preset_en_dialogo)
+        fila_preset = QWidget()
+        fila_preset_layout = QHBoxLayout(fila_preset)
+        fila_preset_layout.setContentsMargins(0, 0, 0, 0)
+        fila_preset_layout.addWidget(self.combo_preset)
+        fila_preset_layout.addWidget(btn_aplicar_preset)
+        layout_senales.addRow("Perfil de Configuración:", fila_preset)
+
         self.peso_neuronal = QDoubleSpinBox()
         self.peso_neuronal.setRange(0, 1)
         self.peso_neuronal.setSingleStep(0.1)
@@ -18864,9 +19527,27 @@ class ConfiguracionDialog(QDialog):
         except Exception:
             pass
 
+    def _aplicar_preset_en_dialogo(self):
+        try:
+            preset = self.combo_preset.currentText() if hasattr(self, "combo_preset") else "BALANCEADO"
+            self.config.aplicar_preset_configuracion(preset)
+            self.umbral_destacada.setValue(float(self.config.UMBRAL_SEÑAL_DESTACADA))
+            self.umbral_confirmada.setValue(float(self.config.UMBRAL_SEÑAL_CONFIRMADA))
+            self.auto_ejecutar_min_confianza.setValue(float(self.config.AUTO_EJECUTAR_MIN_CONFIANZA))
+            self.max_trades_hora.setValue(int(self.config.MAX_TRADES_POR_HORA))
+            self.max_trades_dia.setValue(int(self.config.MAX_TRADES_POR_DIA))
+            self.auto_ejecutar_cooldown_par.setValue(int(self.config.AUTO_EJECUTAR_COOLDOWN_PAR_SEG))
+            self.porcentaje_inversion.setValue(float(self.config.PORCENTAJE_INVERSION) * 100.0)
+            self.interes_compuesto_activo.setChecked(bool(self.config.INTERES_COMPUESTO_ACTIVO))
+        except Exception as e:
+            logger.error(f"Error aplicando preset en diálogo: {e}")
+
     def guardar_configuracion(self):
         self.config.UMBRAL_SEÑAL_DESTACADA = self.umbral_destacada.value()
         self.config.UMBRAL_SEÑAL_CONFIRMADA = self.umbral_confirmada.value()
+        if hasattr(self, "combo_preset"):
+            self.config.PERFIL_CONFIG_PRESET = self.combo_preset.currentText()
+        self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
         self.config.PESO_NEURONAL = self.peso_neuronal.value()
         self.config.PESO_TECNICO = self.peso_tecnico.value()
 
@@ -19748,7 +20429,7 @@ if GUI_AVAILABLE:
             if not hasattr(self, "consola"):
                 self.consola = ConsolaFlotante(
                     ai_engine=self.api.ai_engine,
-                    log_file="IQ_Option 2.8.6_pro.log"
+                    log_file="IQ_Option 2.8_pro.log"
                 )
             # ==================================================
             # 3. DETECCIÓN DE PARES ABIERTOS (REAL)
@@ -19869,7 +20550,7 @@ if GUI_AVAILABLE:
                 self.btn_stop.setEnabled(True)
 
             # === CONSOLA FLOTANTE ===
-            self.consola = ConsolaFlotante("IQ_Option 2.8.6_pro.log")
+            self.consola = ConsolaFlotante("IQ_Option 2.8_pro.log")
 
             gui_handler = LogHandlerGUI(self.consola)
             gui_handler.setLevel(logging.INFO)
@@ -22411,17 +23092,26 @@ def mostrar_dashboard_consola(
 def run_headless_mode():
     """Ejecuta el bot en modo sin interfaz gráfica (servidor/terminal)"""
     logger.info("=" * 60)
-    logger.info("IQ_Option 2.8.6 - MODO HEADLESS (Sin GUI)")
+    logger.info("IQ_Option 2.8 - MODO HEADLESS (Sin GUI)")
     logger.info("=" * 60)
 
     # Inicializar configuración PRIMERO
     config = get_config()
+    try:
+        if getattr(_args, 'perfil', None):
+            preset = str(_args.perfil).upper()
+            if hasattr(config, 'aplicar_preset_configuracion'):
+                config.aplicar_preset_configuracion(preset)
+                config.guardar_configuracion()
+                logger.info(f"Preset de consola aplicado: {preset}")
+    except Exception as e:
+        logger.warning(f"No se pudo aplicar preset de consola: {e}")
 
     try:
         consola_flotante = None
         try:
             if IS_WINDOWS or os.environ.get("DISPLAY"):
-                log_file = "IQ_Option 2.8.6_pro.log"
+                log_file = "IQ_Option 2.8_pro.log"
                 for h in logging.getLogger().handlers:
                     if isinstance(h, logging.FileHandler) and getattr(
                             h, "baseFilename", None):
@@ -22606,6 +23296,23 @@ def run_headless_mode():
         # =============================
         # Loop principal de trading
         # =============================
+        # Activar streams de forma controlada post-cold-start para evitar congelamientos
+        try:
+            if bool(getattr(config, "AUTO_INICIAR_STREAMS_EN_CONEXION", False)):
+                tf_str = str(getattr(config, 'MARCO_TIEMPO_SELECCIONADO', '5'))
+                max_streams = int(getattr(config, "MAX_STREAMS_INICIO", 8) or 8)
+                pares_stream = list(getattr(config, 'PARES_TRADING', []) or [])[:max_streams]
+                if pares_stream:
+                    logger.info(
+                        f"⚡ Activación post-cold-start de streams: {len(pares_stream)} pares (TF: {tf_str})")
+                    for par in pares_stream:
+                        try:
+                            bridge.subscribe_candles(par, tf_str)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.warning(f"No se pudo activar streams post-cold-start: {e}")
+
         logger.info("Iniciando loop de trading (Ctrl+C para detener)")
 
         ultima_actualizacion_pares = time.time()
@@ -23334,6 +24041,17 @@ class ConfigDialogTk:
         self.vars[config_key] = var
         return var
 
+    def _add_dropdown(self, parent, label, config_key, options, default):
+        frame = tk.Frame(parent, bg=self.color_panel)
+        frame.pack(fill=tk.X, pady=5, padx=10)
+        tk.Label(frame, text=label, **self.style_lbl).pack(side=tk.LEFT)
+        val = str(getattr(self.config, config_key, default))
+        var = tk.StringVar(value=val if val in options else default)
+        combo = ttk.Combobox(frame, textvariable=var, values=options, state="readonly", width=18)
+        combo.pack(side=tk.RIGHT)
+        self.vars[config_key] = var
+        return var
+
     def _add_title(self, parent, text, color=None):
         if color is None:
             color = self.color_accent
@@ -23366,6 +24084,7 @@ class ConfigDialogTk:
             "Umbral Señal Confirmada:",
             "UMBRAL_SEÑAL_CONFIRMADA",
             75.0)
+        self._add_dropdown(frame, "Perfil de Configuración:", "PERFIL_CONFIG_PRESET", ["BALANCEADO", "AGRESIVO"], "BALANCEADO")
         self._add_entry(
             frame,
             "Peso Red Neuronal (0.0-1.0):",
@@ -23707,6 +24426,7 @@ class ConfigDialogTk:
                 else:
                     setattr(self.config, key, str(val))
 
+            self.config.aplicar_preset_configuracion(getattr(self.config, "PERFIL_CONFIG_PRESET", "BALANCEADO"))
             self.config.guardar_configuracion()
 
             # 2. Guardar Credenciales IQ
@@ -23734,7 +24454,7 @@ class ConfigDialogTk:
 
 
 class ConsolaFlotante:
-    def __init__(self, ai_engine=None, log_file="IQ_Option 2.8.6_pro.log",
+    def __init__(self, ai_engine=None, log_file="IQ_Option 2.8_pro.log",
                  config=None, start_loop=True):
         self.log_file = log_file
         self.ai = ai_engine
@@ -23742,6 +24462,7 @@ class ConsolaFlotante:
         self.running = True
         self.root = None
         self.tree = None
+        self.log_text = None
         self.lbl_importe = None
         self.lbl_entrenamiento = None
         self.lbl_estadistica = None
@@ -23749,7 +24470,7 @@ class ConsolaFlotante:
         self.lbl_trader = None
         self.lbl_resultados = None
 
-        self._ui_queue = Queue()
+        self._ui_queue = Queue(maxsize=5000)
         self.max_log_rows = 1000
 
         # 🧵 Hilos auxiliares
@@ -23771,7 +24492,13 @@ class ConsolaFlotante:
         try:
             if not self.running:
                 return
-            self._ui_queue.put(("log", str(mensaje)))
+            msg = str(mensaje)
+            # Evitar congelamiento por tormenta de logs: priorizar WARNING/ERROR/CRITICAL
+            if self._ui_queue.qsize() > 3500:
+                m = msg.upper()
+                if not any(x in m for x in ("WARNING", "ERROR", "CRITICAL", "FREEZE_DETECT")):
+                    return
+            self._ui_queue.put_nowait(("log", msg))
         except Exception:
             pass
 
@@ -23789,11 +24516,52 @@ class ConsolaFlotante:
         if self.root and self.config:
             self._ui_queue.put(("open_config", None))
 
+    def _clear_log_view(self):
+        try:
+            if self.tree is not None:
+                self.tree.delete(*self.tree.get_children())
+            if self.log_text is not None:
+                self.log_text.configure(state="normal")
+                self.log_text.delete("1.0", tk.END)
+                self.log_text.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _append_terminal_line(self, hora: str, nivel: str, comp: str, texto: str):
+        if self.log_text is None:
+            return
+        try:
+            lvl = str(nivel or "INFO").upper()
+            icon = {
+                "INFO": "[+]",
+                "WARNING": "[!]",
+                "ERROR": "[x]",
+                "DEBUG": "[·]"
+            }.get(lvl, "[+]")
+            line = f"{hora:>8} {icon:<3} {comp:<18} | {texto}\n"
+            tag = lvl if lvl in ("INFO", "WARNING", "ERROR", "DEBUG") else "INFO"
+
+            self.log_text.configure(state="normal")
+            self.log_text.insert(tk.END, line, (tag,))
+
+            # Limitar líneas para no crecer sin control
+            max_lines = int(getattr(self, "max_log_rows", 1000) or 1000)
+            total_lines = int(float(self.log_text.index('end-1c').split('.')[0]))
+            if total_lines > max_lines:
+                extra = total_lines - max_lines
+                self.log_text.delete("1.0", f"{extra + 1}.0")
+
+            self.log_text.see(tk.END)
+            self.log_text.configure(state="disabled")
+        except Exception:
+            pass
+
     def _ui_loop(self):
         try:
             self.root = tk.Tk()
-            self.root.title("📊 Consola de Diagnóstico – IQ Option Bot")
-            self.root.geometry("1100x600")
+            self.root.title("IQ Option IA 2.8 | Trading Console Pro")
+            self.root.geometry("1280x760")
+            self.root.minsize(1100, 680)
             self.root.configure(bg="#1e1e1e")
 
             # Configurar estilo oscuro para Treeview
@@ -23811,13 +24579,20 @@ class ConsolaFlotante:
             style.map("Treeview", background=[("selected", "#007acc")])
 
             # Barra superior de herramientas
-            toolbar = tk.Frame(self.root, bg="#333", height=30)
+            toolbar = tk.Frame(self.root, bg="#111827", height=36)
             toolbar.pack(fill=tk.X, side=tk.TOP)
+
+            tk.Label(toolbar, text="IQ Option IA 2.8 • Console Pro", bg="#111827", fg="#E5E7EB", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=10)
 
             btn_config = tk.Button(toolbar, text="⚙️ Configuración Avanzada",
                                    command=lambda: self.abrir_configuracion(),
-                                   bg="#444", fg="white", relief="flat", font=("Arial", 9))
-            btn_config.pack(side=tk.RIGHT, padx=10, pady=2)
+                                   bg="#2563EB", fg="white", relief="flat", font=("Segoe UI", 9, "bold"))
+            btn_config.pack(side=tk.RIGHT, padx=8, pady=4)
+
+            btn_clear = tk.Button(toolbar, text="🧹 Limpiar Log",
+                                  command=lambda: self._clear_log_view(),
+                                  bg="#374151", fg="#F9FAFB", relief="flat", font=("Segoe UI", 9))
+            btn_clear.pack(side=tk.RIGHT, padx=4, pady=4)
 
             # Contenedor principal dividido
             paned = tk.PanedWindow(
@@ -23885,45 +24660,45 @@ class ConsolaFlotante:
                 frame_dash, text="$0.00", **style_lbl_val)
             self.lbl_resultados.pack(fill=tk.X)
 
-            # --- PANEL DERECHO (Logs en Columnas) ---
-            frame_log = tk.Frame(paned, bg="black")
-            paned.add(frame_log, minsize=500)
+            # --- PANEL DERECHO (Terminal profesional) ---
+            frame_log = tk.Frame(paned, bg="#05070B")
+            paned.add(frame_log, minsize=700)
 
-            # Treeview y Scrollbar
-            columns = ("hora", "nivel", "componente", "mensaje")
-            self.tree = ttk.Treeview(
+            header = tk.Label(
                 frame_log,
-                columns=columns,
-                show="headings",
-                selectmode="browse")
+                text="┌─ TERMINAL DE OPERACIONES ────────────────────────────────────────────────────────────────┐",
+                bg="#05070B", fg="#94A3B8", font=("Consolas", 10, "bold"), anchor="w")
+            header.pack(fill=tk.X, padx=8, pady=(6, 0))
 
-            # Configurar columnas
-            self.tree.column("hora", width=150, minwidth=100)
-            self.tree.column("nivel", width=80, minwidth=60, anchor="center")
-            self.tree.column("componente", width=120, minwidth=80)
-            self.tree.column("mensaje", width=500, minwidth=200)
-
-            self.tree.heading("hora", text="HORA")
-            self.tree.heading("nivel", text="NIVEL")
-            self.tree.heading("componente", text="COMPONENTE")
-            self.tree.heading("mensaje", text="MENSAJE")
-
-            scrollbar = ttk.Scrollbar(
+            self.log_text = tk.Text(
                 frame_log,
-                orient=tk.VERTICAL,
-                command=self.tree.yview)
-            self.tree.configure(yscroll=scrollbar.set)
+                bg="#05070B",
+                fg="#22C55E",
+                insertbackground="#22C55E",
+                font=("Consolas", 10),
+                relief="flat",
+                wrap="none",
+                state="disabled")
 
-            self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            y_scroll = ttk.Scrollbar(frame_log, orient=tk.VERTICAL, command=self.log_text.yview)
+            x_scroll = ttk.Scrollbar(frame_log, orient=tk.HORIZONTAL, command=self.log_text.xview)
+            self.log_text.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
 
-            # Tags de colores para niveles
-            self.tree.tag_configure(
-                "INFO", foreground="#00ff00")      # Verde brillante
-            self.tree.tag_configure(
-                "WARNING", foreground="#ffaa00")   # Naranja
-            self.tree.tag_configure("ERROR", foreground="#ff4444")     # Rojo
-            self.tree.tag_configure("DEBUG", foreground="#888888")     # Gris
+            self.log_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=6)
+            x_scroll.pack(side=tk.BOTTOM, fill=tk.X, padx=8)
+            y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+            self.log_text.tag_configure("INFO", foreground="#22C55E")
+            self.log_text.tag_configure("WARNING", foreground="#F59E0B")
+            self.log_text.tag_configure("ERROR", foreground="#EF4444")
+            self.log_text.tag_configure("DEBUG", foreground="#9CA3AF")
+
+            self.log_text.configure(state="normal")
+            self.log_text.insert(tk.END, "TIME     LVL COMPONENT           | MESSAGE\n", ("DEBUG",))
+            self.log_text.insert(tk.END, "-------- --- -------------------+---------------------------------------------------------\n", ("DEBUG",))
+            self.log_text.configure(state="disabled")
+            self.status_var = tk.StringVar(value="Estado: En ejecución | Alineación 1m/5m activa")
+            tk.Label(self.root, textvariable=self.status_var, bg="#0B1220", fg="#93C5FD", anchor="w", font=("Segoe UI", 9)).pack(fill=tk.X, side=tk.BOTTOM)
 
             self.root.protocol("WM_DELETE_WINDOW", self.cerrar)
             self._ui_queue.put(
@@ -23944,43 +24719,17 @@ class ConsolaFlotante:
                                 ConfigDialogTk(self.root, self.config)
                             except Exception as e:
                                 print(f"Error abriendo config: {e}")
-                        elif kind == "log" and self.tree is not None:
+                        elif kind == "log" and self.log_text is not None:
                             try:
                                 msg = str(payload).strip()
-                                # Parsear log: "YYYY-MM-DD HH:MM:SS,ms - Comp - LVL - Msg"
-                                # Regex simplificada para capturar grupos
                                 match = re.match(
                                     r"^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}),\d+\s+-\s+(\S+)\s+-\s+(\w+)\s+-\s+(.*)$", msg)
-
                                 if match:
                                     hora, comp, nivel, texto = match.groups()
-                                    tag = nivel.upper() if nivel.upper() in (
-                                        "INFO", "WARNING", "ERROR", "DEBUG") else "INFO"
-                                    self.tree.insert(
-                                        "", tk.END, values=(
-                                            hora, nivel, comp, texto), tags=(
-                                            tag,))
-                                    if self.max_log_rows:
-                                        children = self.tree.get_children()
-                                        if len(children) > self.max_log_rows:
-                                            for item in children[:len(children) - self.max_log_rows]:
-                                                self.tree.delete(item)
+                                    self._append_terminal_line(hora[-8:], nivel, comp, texto)
                                 else:
-                                    # Fallback para mensajes sin formato
                                     ahora = time.strftime("%H:%M:%S")
-                                    self.tree.insert(
-                                        "", tk.END, values=(
-                                            ahora, "INFO", "System", msg), tags=(
-                                            "INFO",))
-                                    if self.max_log_rows:
-                                        children = self.tree.get_children()
-                                        if len(children) > self.max_log_rows:
-                                            for item in children[:len(children) - self.max_log_rows]:
-                                                self.tree.delete(item)
-
-                                # Auto-scroll al final
-                                if self.tree.get_children():
-                                    self.tree.yview_moveto(1)
+                                    self._append_terminal_line(ahora, "INFO", "System", msg)
                             except Exception:
                                 pass
                         elif kind == "update_dash":
@@ -24189,9 +24938,17 @@ if __name__ == "__main__":
         help='Enviar prueba de señal destacada y confirmada a Telegram')
     args, _ = parser.parse_known_args()
 
-    FORCE_CONSOLE = args.console or args.headless or os.environ.get(
-        'HEADLESS', '').lower() == 'true'
-    FORCE_GUI = args.gui
+    FORCE_CONSOLE = bool(
+        args.console
+        or args.headless
+        or os.environ.get('HEADLESS', '').lower() == 'true'
+        or IS_REPLIT
+        or (not IS_WINDOWS and os.environ.get('DISPLAY') is None)
+    )
+    FORCE_GUI = bool(args.gui)
+
+    if FORCE_GUI:
+        FORCE_CONSOLE = False
 
     # DEFENSIVE CHECK: If GUI is not available, always run in headless mode
     if not GUI_AVAILABLE and not FORCE_CONSOLE:
@@ -24209,8 +24966,8 @@ if __name__ == "__main__":
             ok = _prueba_telegram_envio(cfg, bridge if ok_conn else None)
             try:
                 bridge.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("No se pudo desconectar bridge en test de Telegram: %s", exc)
             sys.exit(0 if ok else 1)
         else:
             run_headless_mode()
@@ -24233,8 +24990,8 @@ if __name__ == "__main__":
                     pref = json.load(f)
                     if pref.get("recordar"):
                         modo_auto = pref.get("modo")
-        except BaseException:
-            pass
+        except BaseException as exc:
+            logger.warning("No se pudo leer modo_preferido.json: %s", exc)
 
         if modo_auto == "consola":
             run_headless_mode()
