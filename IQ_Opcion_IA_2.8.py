@@ -30,6 +30,7 @@ import random
 import time
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import pickle
 import threading
 import platform
@@ -72,8 +73,15 @@ if HEADLESS_MODE:
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 # Configuración de logging - Archivo + Consola en modo headless
+_log_max_mb = int(os.environ.get('LOG_MAX_MB', '20') or 20)
+_log_backup_count = int(os.environ.get('LOG_BACKUP_COUNT', '7') or 7)
 _log_handlers = [
-    logging.FileHandler('IQ_Option 2.8_pro.log', encoding='utf-8'),
+    RotatingFileHandler(
+        'IQ_Option 2.8_pro.log',
+        maxBytes=max(1, _log_max_mb) * 1024 * 1024,
+        backupCount=max(1, _log_backup_count),
+        encoding='utf-8'
+    ),
 
 ]
 if HEADLESS_MODE:
@@ -9364,6 +9372,13 @@ class IQOptionBridge:
         self._candles_streams = {}
         self._candles_callbacks = {}
         self._candles_event_queue = Queue(maxsize=5000)
+        # Control de memoria de streams/cola de velas
+        self._candles_queue_soft_limit = int(getattr(config, "CANDLES_QUEUE_SOFT_LIMIT", 3000) or 3000)
+        self._candles_queue_hard_limit = int(getattr(config, "CANDLES_QUEUE_HARD_LIMIT", 4500) or 4500)
+        self._candles_buffer_max_default = int(getattr(config, "CANDLES_BUFFER_MAX_PER_STREAM", 400) or 400)
+        self._candles_prune_interval_sec = float(getattr(config, "CANDLES_PRUNE_INTERVAL_SEC", 30.0) or 30.0)
+        self._candles_inactive_ttl_sec = float(getattr(config, "CANDLES_INACTIVE_TTL_SEC", 600.0) or 600.0)
+        self._last_candles_prune_ts = 0.0
         self._last_queue_relief_ts = 0.0
         self._stream_retry_state = {}
         self._stream_warn_throttle = {}
@@ -10231,6 +10246,56 @@ class IQOptionBridge:
         except Exception:
             pass
 
+    def _aplicar_control_memoria_streams(self) -> None:
+        """Controla crecimiento de cola y buffers de velas para evitar uso excesivo de RAM."""
+        try:
+            qsize = int(self._candles_event_queue.qsize())
+        except Exception:
+            qsize = 0
+
+        # Alivio temprano de cola
+        try:
+            if qsize >= int(self._candles_queue_soft_limit):
+                target = int(max(1000, self._candles_queue_soft_limit * 0.70))
+                while self._candles_event_queue.qsize() > target:
+                    try:
+                        self._candles_event_queue.get_nowait()
+                    except Exception:
+                        break
+        except Exception:
+            pass
+
+        # Reducción adaptativa de buffers por stream bajo presión alta
+        if qsize < int(self._candles_queue_hard_limit):
+            return
+
+        with self._candles_stream_lock:
+            for sk, st in self._candles_streams.items():
+                buf = st.get("buffer_velas")
+                if not isinstance(buf, deque) or len(buf) <= 100:
+                    continue
+                reduced_max = min(int(st.get("maxdict", 200)), 150)
+                reduced_max = max(80, reduced_max)
+                if buf.maxlen is None or buf.maxlen > reduced_max:
+                    st["buffer_velas"] = deque(list(buf)[-reduced_max:], maxlen=reduced_max)
+                    st["maxdict"] = reduced_max
+
+    def _prunar_streams_inactivos(self) -> None:
+        now = time.time()
+        if (now - float(getattr(self, "_last_candles_prune_ts", 0.0))) < float(self._candles_prune_interval_sec):
+            return
+        self._last_candles_prune_ts = now
+
+        with self._candles_stream_lock:
+            for sk, st in list(self._candles_streams.items()):
+                callbacks = st.get("callbacks") or {}
+                last_activity = float(st.get("last_activity_ts", now))
+                inactive = (now - last_activity) >= float(self._candles_inactive_ttl_sec)
+                if (not callbacks) and inactive:
+                    # mantener stream, pero liberar buffer agresivamente
+                    st["buffer_velas"] = deque(maxlen=min(60, int(st.get("maxdict", 60))))
+                    st["last_emitted"] = 0
+
     def _loop_publicador_velas(self):
         while not self._candles_publisher_stop.is_set():
             try:
@@ -10276,6 +10341,7 @@ class IQOptionBridge:
                         if stream_key in self._candles_streams:
                             self._candles_streams[stream_key]["last_emitted"] = last_emitted
 
+                self._prunar_streams_inactivos()
                 time.sleep(0.2)
             except Exception:
                 time.sleep(0.5)
@@ -10290,6 +10356,13 @@ class IQOptionBridge:
 
         if isinstance(buffer_velas, deque):
             buffer_velas.append(vela)
+
+        try:
+            with self._candles_stream_lock:
+                if stream_key in self._candles_streams:
+                    self._candles_streams[stream_key]["last_activity_ts"] = time.time()
+        except Exception:
+            pass
 
         # Si no hay callbacks registrados, evitar inflar cola innecesariamente
         if not callbacks:
@@ -10332,6 +10405,7 @@ class IQOptionBridge:
             pass
 
         try:
+            self._aplicar_control_memoria_streams()
             self._candles_event_queue.put_nowait(evento)
         except Exception:
             try:
@@ -10359,7 +10433,7 @@ class IQOptionBridge:
                 self.api, "get_realtime_candles"):
             return None
 
-        maxdict = int(max(50, maxdict))
+        maxdict = int(max(50, min(maxdict, self._candles_buffer_max_default)))
         stream_key = f"{simbolo}:{int(timeframe_segundos)}"
 
         with self._candles_stream_lock:
@@ -10406,6 +10480,7 @@ class IQOptionBridge:
                     "last_emitted": 0,
                     "buffer_velas": deque(maxlen=maxdict),
                     "callbacks": {},
+                    "last_activity_ts": time.time(),
                 }
         else:
             prev_maxdict = int(stream_state.get("maxdict", 50))
@@ -10497,6 +10572,7 @@ class IQOptionBridge:
         with self._candles_stream_lock:
             if stream_key in self._candles_streams:
                 self._candles_streams[stream_key]["callbacks"][subscription_id] = callback
+                self._candles_streams[stream_key]["last_activity_ts"] = time.time()
                 self._candles_callbacks[subscription_id] = stream_key
 
         return subscription_id
