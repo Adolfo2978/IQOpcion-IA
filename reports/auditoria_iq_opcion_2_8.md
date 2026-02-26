@@ -1,7 +1,7 @@
 # Auditoría técnica — IQ_Opcion_IA_2.8.py
 
 ## Resumen ejecutivo
-- Líneas totales: **24801**
+- Líneas totales: **24802**
 - Definiciones top-level (funciones/clases): **67**
 - Imports detectados: **41**
 - Imports duplicados: **6** → collections.deque, datetime.datetime, typing.Dict, typing.List, typing.Optional, typing.Tuple
@@ -20,54 +20,54 @@
 - `silent_exception` en línea **9232**, exc=Exception
 - `silent_exception` en línea **9346**, exc=Exception
 - `silent_exception` en línea **9397**, exc=Exception
-- `silent_exception` en línea **10152**, exc=Exception
-- `silent_exception` en línea **10160**, exc=Exception
-- `silent_exception` en línea **10230**, exc=Exception
-- `silent_exception` en línea **10311**, exc=Exception
-- `silent_exception` en línea **10330**, exc=Exception
-- `silent_exception` en línea **10530**, exc=Exception
-- `silent_exception` en línea **14544**, exc=Exception
-- `silent_exception` en línea **14616**, exc=Exception
-- `silent_exception` en línea **14636**, exc=Exception
-- `silent_exception` en línea **16054**, exc=Exception
-- `silent_exception` en línea **16089**, exc=Exception
-- `silent_exception` en línea **18480**, exc=Exception
-- `silent_exception` en línea **19306**, exc=Exception
-- `silent_exception` en línea **19312**, exc=Exception
-- `silent_exception` en línea **22943**, exc=Exception
-- `silent_exception` en línea **23590**, exc=BaseException
-- `silent_exception` en línea **24287**, exc=Exception
-- `silent_exception` en línea **24296**, exc=Exception
-- `silent_exception` en línea **24312**, exc=Exception
-- `silent_exception` en línea **24341**, exc=Exception
-- `silent_exception` en línea **24598**, exc=Exception
-- `silent_exception` en línea **24640**, exc=Exception
+- `silent_exception` en línea **10153**, exc=Exception
+- `silent_exception` en línea **10161**, exc=Exception
+- `silent_exception` en línea **10231**, exc=Exception
+- `silent_exception` en línea **10312**, exc=Exception
+- `silent_exception` en línea **10331**, exc=Exception
+- `silent_exception` en línea **10531**, exc=Exception
+- `silent_exception` en línea **14545**, exc=Exception
+- `silent_exception` en línea **14617**, exc=Exception
+- `silent_exception` en línea **14637**, exc=Exception
+- `silent_exception` en línea **16055**, exc=Exception
+- `silent_exception` en línea **16090**, exc=Exception
+- `silent_exception` en línea **18481**, exc=Exception
+- `silent_exception` en línea **19307**, exc=Exception
+- `silent_exception` en línea **19313**, exc=Exception
+- `silent_exception` en línea **22944**, exc=Exception
+- `silent_exception` en línea **23591**, exc=BaseException
+- `silent_exception` en línea **24288**, exc=Exception
+- `silent_exception` en línea **24297**, exc=Exception
+- `silent_exception` en línea **24313**, exc=Exception
+- `silent_exception` en línea **24342**, exc=Exception
+- `silent_exception` en línea **24599**, exc=Exception
+- `silent_exception` en línea **24641**, exc=Exception
 - `silent_exception` en línea **3291**, exc=Exception
 - `silent_exception` en línea **3304**, exc=Exception
 - `silent_exception` en línea **3314**, exc=Exception
 - `silent_exception` en línea **8165**, exc=Exception
 - `silent_exception` en línea **9527**, exc=Exception
-- `silent_exception` en línea **10210**, exc=Exception
-- `silent_exception` en línea **10214**, exc=Exception
-- `silent_exception` en línea **10219**, exc=Exception
-- `silent_exception` en línea **10223**, exc=Exception
-- `silent_exception` en línea **10299**, exc=Exception
-- `silent_exception` en línea **10348**, exc=Exception
-- `silent_exception` en línea **10631**, exc=Exception
-- `silent_exception` en línea **12294**, exc=Exception
-- `silent_exception` en línea **13480**, exc=Exception
-- `silent_exception` en línea **14810**, exc=Exception
-- `silent_exception` en línea **15181**, exc=Exception
-- `silent_exception` en línea **17270**, exc=Exception
-- `silent_exception` en línea **17327**, exc=Exception
-- `silent_exception` en línea **19873**, exc=Exception
-- `silent_exception` en línea **20685**, exc=Exception
-- `silent_exception` en línea **20752**, exc=Exception
-- `silent_exception` en línea **20782**, exc=Exception
-- `silent_exception` en línea **23512**, exc=BaseException
-- `silent_exception` en línea **23603**, exc=BaseException
-- `silent_exception` en línea **24589**, exc=Exception
-- `silent_exception` en línea **24647**, exc=Exception
+- `silent_exception` en línea **10211**, exc=Exception
+- `silent_exception` en línea **10215**, exc=Exception
+- `silent_exception` en línea **10220**, exc=Exception
+- `silent_exception` en línea **10224**, exc=Exception
+- `silent_exception` en línea **10300**, exc=Exception
+- `silent_exception` en línea **10349**, exc=Exception
+- `silent_exception` en línea **10632**, exc=Exception
+- `silent_exception` en línea **12295**, exc=Exception
+- `silent_exception` en línea **13481**, exc=Exception
+- `silent_exception` en línea **14811**, exc=Exception
+- `silent_exception` en línea **15182**, exc=Exception
+- `silent_exception` en línea **17271**, exc=Exception
+- `silent_exception` en línea **17328**, exc=Exception
+- `silent_exception` en línea **19874**, exc=Exception
+- `silent_exception` en línea **20686**, exc=Exception
+- `silent_exception` en línea **20753**, exc=Exception
+- `silent_exception` en línea **20783**, exc=Exception
+- `silent_exception` en línea **23513**, exc=BaseException
+- `silent_exception` en línea **23604**, exc=BaseException
+- `silent_exception` en línea **24590**, exc=Exception
+- `silent_exception` en línea **24648**, exc=Exception
 - `silent_exception` en línea **2233**, exc=Exception
 - `silent_exception` en línea **2280**, exc=Exception
 - `silent_exception` en línea **2910**, exc=Exception
@@ -75,28 +75,28 @@
 - `silent_exception` en línea **4616**, exc=Exception
 - `silent_exception` en línea **4715**, exc=Exception
 - `silent_exception` en línea **7561**, exc=Exception
-- `silent_exception` en línea **10053**, exc=Exception
-- `silent_exception` en línea **10192**, exc=Exception
-- `silent_exception` en línea **10228**, exc=Exception
-- `silent_exception` en línea **10338**, exc=Exception
-- `silent_exception` en línea **10342**, exc=Exception
-- `silent_exception` en línea **10823**, exc=Exception
-- `silent_exception` en línea **12682**, exc=Exception
-- `silent_exception` en línea **13274**, exc=Exception
-- `silent_exception` en línea **14028**, exc=BaseException
-- `silent_exception` en línea **14806**, exc=Exception
-- `silent_exception` en línea **15035**, exc=Exception
-- `silent_exception` en línea **16243**, exc=BaseException
+- `silent_exception` en línea **10054**, exc=Exception
+- `silent_exception` en línea **10193**, exc=Exception
+- `silent_exception` en línea **10229**, exc=Exception
+- `silent_exception` en línea **10339**, exc=Exception
+- `silent_exception` en línea **10343**, exc=Exception
+- `silent_exception` en línea **10824**, exc=Exception
+- `silent_exception` en línea **12683**, exc=Exception
+- `silent_exception` en línea **13275**, exc=Exception
+- `silent_exception` en línea **14029**, exc=BaseException
+- `silent_exception` en línea **14807**, exc=Exception
+- `silent_exception` en línea **15036**, exc=Exception
+- `silent_exception` en línea **16244**, exc=BaseException
 
 ## Bloques más grandes (mantenibilidad)
-- ClassDef `IQOptionBridge` líneas 9289-14082 (**4794** líneas)
-- ClassDef `ConfiguracionDialog` líneas 18427-19829 (**1403** líneas)
+- ClassDef `IQOptionBridge` líneas 9289-14083 (**4795** líneas)
+- ClassDef `ConfiguracionDialog` líneas 18428-19830 (**1403** líneas)
 - ClassDef `EstrategiaMultiTimeframe` líneas 5639-6915 (**1277** líneas)
 - ClassDef `SeguimientoSenales` líneas 7524-8404 (**881** líneas)
 - ClassDef `MarketMakerStrategy` líneas 4773-5632 (**860** líneas)
-- ClassDef `AnalizadorMercado` líneas 15191-16006 (**816** líneas)
+- ClassDef `AnalizadorMercado` líneas 15192-16007 (**816** líneas)
 - ClassDef `ConfiguracionTrading` líneas 2542-3315 (**774** líneas)
-- ClassDef `TelegramNotifier` líneas 16013-16703 (**691** líneas)
+- ClassDef `TelegramNotifier` líneas 16014-16704 (**691** líneas)
 - ClassDef `MotorTradingIntegrado` líneas 1770-2432 (**663** líneas)
 - ClassDef `AutoTrainer` líneas 8410-9066 (**657** líneas)
 

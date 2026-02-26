@@ -9646,10 +9646,11 @@ class IQOptionBridge:
                                 if (not solo_wins) or is_win:
                                     self.ai_engine.learn_from_result(
                                         is_win, direccion, trade_id=order_id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Error aplicando feedback IA para order_id={order_id}: {e}")
                     cerradas += 1
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Error reconciliando operación order_id={order_id}: {e}")
                     continue
 
             with self._state_lock:
