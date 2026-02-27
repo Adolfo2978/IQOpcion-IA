@@ -920,7 +920,7 @@ class AIEngineContinuous:
             f"[IA] Dirección de trade establecida: {self._last_direction}")
 
     def learn_from_result(
-            self, is_win: bool, direction: str = None, account_type: str = "PRACTICE", trade_id: int = None):
+            self, is_win: bool, direction: str = None, account_type: str = "PRACTICE", trade_id: int = None, confidence: float = None):
         """
         Aprende SOLO cuando hay resultado real (WIN / LOSS).
         Debe llamarse exactamente UNA VEZ al cerrar la operación.
@@ -974,6 +974,21 @@ class AIEngineContinuous:
                 self.logger.error(
                     f"[IA] ❌ Tipo de cuenta inválido: {account_type}"
                 )
+                return
+
+            # 4.5️⃣ Semana Alta: entrenar SOLO con WIN + confianza > 88%
+            if not bool(is_win):
+                self.logger.info("[IA] Feedback omitido: se entrena solo con WIN")
+                return
+            conf_ref = confidence
+            if conf_ref is None:
+                conf_ref = float(getattr(self, "last_confidence", 0.0) or 0.0) * 100.0
+            try:
+                conf_ref = float(conf_ref)
+            except Exception:
+                conf_ref = 0.0
+            if conf_ref < 88.0:
+                self.logger.info(f"[IA] Feedback omitido: confianza insuficiente ({conf_ref:.2f}% < 88%)")
                 return
 
             # 5️⃣ Doble confirmación de feedback (Semana 2)
@@ -2720,7 +2735,7 @@ class ConfiguracionTrading:
 
         self.USAR_TF_1M = True
         self.USAR_TF_5M = True
-        self.USAR_TF_15M = False
+        self.USAR_TF_15M = True
         self.USAR_TF_30M = False
         self.UMBRAL_ALINEACION_TF = 92
         self.FILTRO_APRENDIZAJE_HABILITADO = True
@@ -2887,11 +2902,16 @@ class ConfiguracionTrading:
         self.PAUSA_AL_STOP_LOSS = True
         self.MAX_TRADES_POR_HORA = 6
         self.MAX_TRADES_POR_DIA = 30
-        self.AUTO_EJECUTAR_BROKER = False
+        self.AUTO_EJECUTAR_BROKER = True
+        self.SYNC_CICLO_SEGUNDO_CERO = True
+        self.SYNC_CICLO_MARGEN_SEG = 1.2
         self.AUTO_EJECUTAR_MIN_CONFIANZA = 84.0
         self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = 30
         self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 120
         self.COOLDOWN_POST_LOSS_SEC = 120
+        self.POST_LOSS_COOLDOWN_SEC = 180
+        self.CIRCUIT_BREAKER_MAX_LOSSES_CONSECUTIVAS = 3
+        self.CIRCUIT_BREAKER_COOLDOWN_SEC = 900
         self.AUTO_EJECUTAR_CONFIRMACIONES = 1
         self.AUTO_EJECUTAR_INTERVALO_VERIFICACION = 5
         self.RIESGO_POR_OPERACION = 0.02
@@ -7160,6 +7180,12 @@ class HumanMouseExecutor:
             ciclo = max(60, duracion_min * 60)
             restante = float(ciclo - (ts % ciclo))
 
+            # Sincronizar ciclo al segundo cero para evitar entradas tardías
+            sync_exact = bool(getattr(self.config, "SYNC_CICLO_SEGUNDO_CERO", True))
+            margen_sync = float(getattr(self.config, "SYNC_CICLO_MARGEN_SEG", 1.2) or 1.2)
+            if sync_exact and restante <= margen_sync:
+                time.sleep(max(0.0, restante) + 0.05)
+
             if restante <= 8.0:
                 time.sleep(max(0.0, restante) + random.uniform(0.6, 1.4))
 
@@ -8423,7 +8449,7 @@ class SeguimientoSenales:
                     solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True))
                     if (not solo_wins) or bool(is_win):
                         self.ai_engine.learn_from_result(
-                            is_win, senal.get("direccion"))
+                            is_win, senal.get("direccion"), confidence=float(senal.get("confianza_actual", 0) or 0))
         except Exception as e:
             self.logger.error(
                 f"❌ Error enviando feedback a IA: {e}",
@@ -9490,6 +9516,8 @@ class IQOptionBridge:
         self.sesion_inicio = datetime.now()
         self.sesion_wins = 0
         self.sesion_losses = 0
+        self._consecutive_losses = 0
+        self._post_loss_cooldown_until = 0.0
 
         self.ultimo_chequeo_entrenamiento = datetime.now()
         self.ultimo_reconexion = datetime.now()
@@ -9569,6 +9597,30 @@ class IQOptionBridge:
         if len(self._candles_timeout_log) >= self._candles_timeout_threshold:
             self._candles_circuit_open_until = now + \
                 self._candles_circuit_pause_sec
+
+
+    def _en_cooldown_post_loss(self) -> bool:
+        try:
+            return time.time() < float(getattr(self, "_post_loss_cooldown_until", 0.0) or 0.0)
+        except Exception:
+            return False
+
+    def _registrar_resultado_post_trade(self, exitoso: bool) -> None:
+        try:
+            now = time.time()
+            if exitoso:
+                self._consecutive_losses = 0
+                return
+            self._consecutive_losses = int(getattr(self, "_consecutive_losses", 0) or 0) + 1
+            cd_loss = float(getattr(self.config, "POST_LOSS_COOLDOWN_SEC", 180) or 180)
+            cb_max = int(getattr(self.config, "CIRCUIT_BREAKER_MAX_LOSSES_CONSECUTIVAS", 3) or 3)
+            cb_cd = float(getattr(self.config, "CIRCUIT_BREAKER_COOLDOWN_SEC", 900) or 900)
+            self._post_loss_cooldown_until = max(self._post_loss_cooldown_until, now + cd_loss)
+            if self._consecutive_losses >= cb_max:
+                self._post_loss_cooldown_until = max(self._post_loss_cooldown_until, now + cb_cd)
+                logger.warning(f"🛑 Circuit breaker activo por {self._consecutive_losses} pérdidas consecutivas")
+        except Exception:
+            pass
 
     def _actualizar_win_loss_sesion(self, exitoso: bool) -> dict:
         try:
@@ -9790,10 +9842,11 @@ class IQOptionBridge:
                             if cumple_filtro_aprendizaje(
                                     self.config, direccion, indicadores):
                                 is_win = float(beneficio) > 0
+                                self._registrar_resultado_post_trade(is_win)
                                 solo_wins = bool(getattr(self.config, "AUTOAPRENDIZAJE_SOLO_WINS", True))
                                 if (not solo_wins) or is_win:
                                     self.ai_engine.learn_from_result(
-                                        is_win, direccion, trade_id=order_id)
+                                        is_win, direccion, trade_id=order_id, confidence=float(op.get("confianza", 0) or 0))
                     except Exception as e:
                         logger.debug(f"Error aplicando feedback IA para order_id={order_id}: {e}")
                     cerradas += 1
@@ -13250,6 +13303,9 @@ class IQOptionBridge:
             if not self.connected:
                 logger.warning("No conectado a IQ Option")
                 return None
+            if self._en_cooldown_post_loss():
+                logger.warning("Bloqueado por cooldown/circuit-breaker post-loss")
+                return {'ejecutado': False, 'razon': 'cooldown_post_loss'}
             if getattr(self.config, "MODO_PAPER_TRADING", False):
                 logger.info(
                     f"[PAPER] Señal detectada en {simbolo}, pero MODO_PAPER_TRADING=True (sin broker)")
@@ -13358,7 +13414,7 @@ class IQOptionBridge:
                      alineacion_tf['confianza'] = res_confluencia.get('confianza', 0.0) / 100.0
                      alineacion_tf['tf_1m'] = 'OK'
 
-            # Requisito estricto: operar solo con alineación 1m/5m/15m
+            # Requisito estricto: operar solo con alineación 1m/5m/15m (obligatorio)
             if not alineacion_tf['alineado']:
                 return {
                     'ejecutado': False,
@@ -23435,7 +23491,7 @@ def run_headless_mode():
                                     # resultados reales)
                                     if bridge.ai_engine:
                                         bridge.ai_engine.learn_from_result(
-                                            is_win, direction)
+                                            is_win, direction, confidence=float(trade.get("confianza", 0) or 0))
 
                                     # Guardar trade en repositorio para
                                     # aprendizaje futuro
