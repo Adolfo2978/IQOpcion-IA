@@ -11606,10 +11606,18 @@ class IQOptionBridge:
             logger.debug(f"Error sync get products: {e}")
         return None
 
-    def connect(self) -> bool:
-        """Establece una conexión a IQ Option usando API estable (prioridad) o async."""
+    def connect(self, email: Optional[str] = None, password: Optional[str] = None,
+                tipo_cuenta: Optional[str] = None) -> bool:
+        """Establece conexión a IQ Option usando credenciales explícitas o almacenadas."""
         try:
-            email, password = self._cargar_credenciales()
+            if tipo_cuenta in ("PRACTICE", "REAL"):
+                self.tipo_cuenta_actual = str(tipo_cuenta).upper()
+                self.config.TIPO_CUENTA = self.tipo_cuenta_actual
+
+            email = (email or "").strip()
+            password = (password or "").strip()
+            if not email or not password:
+                email, password = self._cargar_credenciales()
             if not email or not password:
                 logger.error("Credenciales de IQ Option no encontradas")
                 return False
@@ -20277,9 +20285,9 @@ class APIWorker(QObject):
         self.bridge = bridge
         self._candles_request_queue = Queue()
 
-    def connect_iq(self, email: str, password: str):
+    def connect_iq(self, email: str, password: str, tipo_cuenta: str = "PRACTICE"):
         try:
-            success = self.bridge.connect()
+            success = self.bridge.connect(email=email, password=password, tipo_cuenta=tipo_cuenta)
             msg = "Conexión exitosa" if success else "Fallo al conectar"
             self.finished.emit(success, msg)
         except Exception as e:
@@ -21490,22 +21498,29 @@ if GUI_AVAILABLE:
             return False
 
         def _cargar_credenciales_completas(self) -> Tuple[str, str, str]:
-            """Carga las credenciales completas incluyendo el tipo de cuenta"""
+            """Carga credenciales IQ sin usar valores hardcodeados."""
             try:
-                if os.path.exists(self.config.RUTA_CREDENCIALES_IQ):
-                    with open(self.config.RUTA_CREDENCIALES_IQ, 'r') as f:
-                        creds = json.load(f)
+                email_env = os.environ.get('IQ_OPTION_EMAIL', '').strip()
+                pass_env = os.environ.get('IQ_OPTION_PASSWORD', '').strip()
+                if email_env and pass_env:
                     return (
-                        creds.get('email', 'aguirreadolfo_125@hotmail.com'),
-                        creds.get('password', 'Carmen29@'),
-                        creds.get('tipo_cuenta', 'PRACTICE')
+                        email_env,
+                        pass_env,
+                        str(getattr(self.config, 'TIPO_CUENTA', 'PRACTICE') or 'PRACTICE').upper()
+                    )
+
+                if os.path.exists(self.config.RUTA_CREDENCIALES_IQ):
+                    with open(self.config.RUTA_CREDENCIALES_IQ, 'r', encoding='utf-8') as f:
+                        creds = json.load(f) or {}
+                    return (
+                        str(creds.get('email', '') or '').strip(),
+                        str(creds.get('password', '') or '').strip(),
+                        str(creds.get('tipo_cuenta', getattr(self.config, 'TIPO_CUENTA', 'PRACTICE')) or 'PRACTICE').upper()
                     )
             except Exception as e:
                 logger.error(f"Error cargando credenciales: {e}")
 
-            # Credenciales por defecto si no se encuentran en el archivo
-            logger.info("Usando credenciales por defecto")
-            return "aguirreadolfo_125@hotmail.com", "CarmenA29@/", "PRACTICE"
+            return "", "", str(getattr(self.config, 'TIPO_CUENTA', 'PRACTICE') or 'PRACTICE').upper()
 
         def toggle_escaneo(self):
             """Activa o desactiva el escaneo del mercado"""
@@ -22752,6 +22767,20 @@ if GUI_AVAILABLE:
                 self.log_mensaje("Conexión en progreso...")
                 return
 
+            email, password, tipo_cuenta = self._cargar_credenciales_completas()
+            if not email or not password:
+                self.log_mensaje("❌ Credenciales IQ Option no configuradas")
+                QMessageBox.warning(
+                    self,
+                    "Credenciales requeridas",
+                    "Configura Email y Password en la pestaña IQ Option o en variables de entorno IQ_OPTION_EMAIL/IQ_OPTION_PASSWORD."
+                )
+                return
+
+            tipo_cuenta = "REAL" if str(tipo_cuenta).upper() == "REAL" else "PRACTICE"
+            self.config.TIPO_CUENTA = tipo_cuenta
+            self.iq_bridge.tipo_cuenta_actual = tipo_cuenta
+
             # Desactivar botón durante operación
             self.btn_conectar.setEnabled(False)
             self.btn_conectar.setText("Conectando...")
@@ -22765,7 +22794,9 @@ if GUI_AVAILABLE:
             self._api_worker.finished.connect(self._on_connection_finished)
             self._api_worker.error.connect(self._on_api_error)
             self._api_worker_thread.started.connect(lambda: self._api_worker.connect_iq(
-                *self._cargar_credenciales_completas()[:2]
+                email,
+                password,
+                tipo_cuenta
             ))
             self._api_worker.finished.connect(self._api_worker_thread.quit)
             self._api_worker.error.connect(self._api_worker_thread.quit)
