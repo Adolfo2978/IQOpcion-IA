@@ -2838,10 +2838,10 @@ class ConfiguracionTrading:
         # UMBRALES DE SEÑALES (OPTIMIZADOS PARA 85%+ WIN RATE)
         # ==========================================
         # Triple confirmación requerida: 1M + 5M + 15M en misma dirección
-        self.UMBRAL_SEÑAL_DESTACADA = 85.0      # Mínimo para considerar señal
+        self.UMBRAL_SEÑAL_DESTACADA = 88.0      # Mínimo para considerar señal
         self.UMBRAL_SEÑAL_CONFIRMADA = 90.0     # Señal fuerte
         self.UMBRAL_SEÑAL_EXCELENTE = 95.0      # Señal premium
-        self.UMBRAL_COMPRA = 85.0               # Mínimo para operar (antes 55%)
+        self.UMBRAL_COMPRA = 88.0               # Mínimo para operar (alta precisión)
         self.UMBRAL_IA_DIRECCION = 60.0         # IA debe tener >60% confianza
         self.UMBRAL_TECNICO_DIRECCION = 55.0    # Técnico debe tener >55%
         
@@ -22875,25 +22875,39 @@ if GUI_AVAILABLE:
                     if not validar_alineacion_estricta_operacion(datos, accion):
                         continue
                     if bool(getattr(self.config, "EXIGIR_FILTROS_CALIDAD_SENAL", True)):
+                        indicadores = datos.get("indicadores", {}) or {}
+
                         volatilidad = datos.get("volatilidad")
                         if volatilidad is None:
-                            volatilidad = (datos.get("indicadores", {}) or {}).get("volatilidad")
+                            volatilidad = indicadores.get("volatilidad")
+                        atr = datos.get("ATR")
+                        if atr is None:
+                            atr = indicadores.get("ATR")
                         try:
                             vol_val = float(volatilidad) if volatilidad is not None else None
                         except Exception:
                             vol_val = None
-                        if vol_val is not None and (vol_val <= 0.01 or vol_val >= 4.5):
+                        try:
+                            atr_val = float(atr) if atr is not None else None
+                        except Exception:
+                            atr_val = None
+
+                        # Evitar mercado demasiado quieto (ATR bajo) o extremadamente errático
+                        if atr_val is not None and atr_val < 0.0002:
+                            continue
+                        if vol_val is not None and (vol_val <= 0.03 or vol_val >= 4.5):
                             continue
 
-                        sesion = str(datos.get("sesion") or (datos.get("indicadores", {}) or {}).get("sesion") or "").upper()
-                        if sesion in ("CIERRE", "UNKNOWN", "SIN_SESION"):
+                        sesion = str(datos.get("sesion") or indicadores.get("sesion") or "").upper()
+                        sesiones_permitidas = {"LONDRES", "NY", "NEW_YORK", "LONDRES_NY"}
+                        if sesion not in sesiones_permitidas:
                             continue
 
                         hay_noticias = bool(
                             datos.get("hay_noticias")
-                            or (datos.get("indicadores", {}) or {}).get("hay_noticias")
+                            or indicadores.get("hay_noticias")
                             or datos.get("news_high_impact")
-                            or (datos.get("indicadores", {}) or {}).get("news_high_impact")
+                            or indicadores.get("news_high_impact")
                         )
                         if hay_noticias:
                             continue
