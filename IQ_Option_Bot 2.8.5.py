@@ -2903,6 +2903,8 @@ class ConfiguracionTrading:
         self.ENFORCE_SECOND_ZERO_SYNC = True
         self.EXIGIR_FILTROS_CALIDAD_SENAL = True
         self.RIESGO_POR_OPERACION = 0.02
+        self.AUTO_TRAIN_MIN_CONFIANZA_WIN = 88.0
+        self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN = 21
         self.SISTEMA_COMPUESTO_HABILITADO = False
         self.PORCENTAJE_REINVERSION = 0.5
         self.HORARIO_TRADING_HABILITADO = False
@@ -3328,6 +3330,10 @@ class ConfiguracionTrading:
                         data.get("ENFORCE_SECOND_ZERO_SYNC", self.ENFORCE_SECOND_ZERO_SYNC))
                     self.EXIGIR_FILTROS_CALIDAD_SENAL = bool(
                         data.get("EXIGIR_FILTROS_CALIDAD_SENAL", self.EXIGIR_FILTROS_CALIDAD_SENAL))
+                    self.AUTO_TRAIN_MIN_CONFIANZA_WIN = float(
+                        data.get("AUTO_TRAIN_MIN_CONFIANZA_WIN", self.AUTO_TRAIN_MIN_CONFIANZA_WIN))
+                    self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN = int(
+                        data.get("AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN", self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN))
 
                     logger.info(f"Configuración cargada desde {archivo}")
 
@@ -3392,6 +3398,8 @@ class ConfiguracionTrading:
                 "CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT": self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT,
                 "ENFORCE_SECOND_ZERO_SYNC": self.ENFORCE_SECOND_ZERO_SYNC,
                 "EXIGIR_FILTROS_CALIDAD_SENAL": self.EXIGIR_FILTROS_CALIDAD_SENAL,
+                "AUTO_TRAIN_MIN_CONFIANZA_WIN": self.AUTO_TRAIN_MIN_CONFIANZA_WIN,
+                "AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN": self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN,
                 "PARES_TRADING": self.PARES_TRADING
             }
 
@@ -4274,6 +4282,19 @@ class OperationsRepository:
                 alineacion_tf = None
             if not exitoso:
                 return
+
+            conf_raw = trade.get('confianza', trade.get('probabilidad', trade.get('probabilidad_predicha', 0.0)))
+            try:
+                conf_val = float(conf_raw)
+            except Exception:
+                conf_val = 0.0
+            if conf_val <= 1.0:
+                conf_pct = conf_val * 100.0
+            else:
+                conf_pct = conf_val
+            if conf_pct < 88.0:
+                return
+
             trade_record = {
                 'id': len(self.trades) + 1,
                 'timestamp': datetime.now().isoformat(),
@@ -9204,13 +9225,15 @@ class AutoTrainer:
         self.config = config
         self.ultimo_entrenamiento = None
         # Mínimo de trades para reentrenar se camnio el 50 por 5
-        self.min_trades_para_entrenar = 5
+        self.min_trades_para_entrenar = int(getattr(self.config, "AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN", 21) or 21)
         self.modelo_actual = None
         self.precision_objetivo = 0.92
         self.precision_actual = 0.5
         self.perfil_actual = None
         self.escalador = None
         self.n_features = None
+        self._ultimo_total_trades_entrenados = 0
+        self.min_confianza_win = float(getattr(self.config, "AUTO_TRAIN_MIN_CONFIANZA_WIN", 88.0) or 88.0)
         # Rutas dinámicas según perfil
         self._actualizar_rutas_segun_perfil()
         # Cargar modelo existente si hay
@@ -9260,14 +9283,13 @@ class AutoTrainer:
                 if horas_desde_ultimo < self.intervalo_horas:
                     return False
 
-            # Verificar si hay suficientes trades
+            # Verificar si hay suficientes patrones ganadores nuevos
             stats = self.operations_repo.obtener_estadisticas()
-            if stats.get('total_trades', 0) < self.min_trades_para_entrenar:
+            total_wins = int(stats.get('trades_exitosos', stats.get('total_trades', 0)) or 0)
+            nuevos_wins = total_wins - int(self._ultimo_total_trades_entrenados or 0)
+            if nuevos_wins < self.min_trades_para_entrenar:
                 logger.info(
-                    f"Insuficientes trades para reentrenar ({
-                        stats.get(
-                            'total_trades', 0)}/{
-                        self.min_trades_para_entrenar})")
+                    f"Insuficientes patrones WIN nuevos para reentrenar ({nuevos_wins}/{self.min_trades_para_entrenar})")
                 return False
 
             logger.info("Iniciando reentrenamiento automático...")
@@ -9281,6 +9303,8 @@ class AutoTrainer:
             exito = self._entrenar_modelo(dataset)
             if exito:
                 self.ultimo_entrenamiento = ahora
+                self._ultimo_total_trades_entrenados = int(
+                    self.operations_repo.obtener_estadisticas().get('trades_exitosos', 0) or 0)
                 logger.info("Reentrenamiento completado exitosamente")
                 return True
             return False
@@ -9298,6 +9322,17 @@ class AutoTrainer:
             # Convertir trades a DataFrame con características extendidas
             registros = []
             for trade in trades:
+                if not bool(trade.get('exitoso', False)):
+                    continue
+                conf_raw = trade.get('confianza', trade.get('probabilidad_predicha', trade.get('probabilidad', 0.0)))
+                try:
+                    conf_val = float(conf_raw)
+                except Exception:
+                    conf_val = 0.0
+                conf_pct = conf_val * 100.0 if conf_val <= 1.0 else conf_val
+                if conf_pct < self.min_confianza_win:
+                    continue
+
                 indicadores = trade.get('indicadores', {})
                 # Características principales
                 rsi = indicadores.get('RSI', 50)
