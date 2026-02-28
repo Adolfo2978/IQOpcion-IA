@@ -2905,6 +2905,7 @@ class ConfiguracionTrading:
         self.RIESGO_POR_OPERACION = 0.02
         self.AUTO_TRAIN_MIN_CONFIANZA_WIN = 88.0
         self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN = 21
+        self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA = 2
         self.SISTEMA_COMPUESTO_HABILITADO = False
         self.PORCENTAJE_REINVERSION = 0.5
         self.HORARIO_TRADING_HABILITADO = False
@@ -3334,6 +3335,8 @@ class ConfiguracionTrading:
                         data.get("AUTO_TRAIN_MIN_CONFIANZA_WIN", self.AUTO_TRAIN_MIN_CONFIANZA_WIN))
                     self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN = int(
                         data.get("AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN", self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN))
+                    self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA = int(
+                        data.get("ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA", self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA))
 
                     logger.info(f"Configuración cargada desde {archivo}")
 
@@ -3400,6 +3403,7 @@ class ConfiguracionTrading:
                 "EXIGIR_FILTROS_CALIDAD_SENAL": self.EXIGIR_FILTROS_CALIDAD_SENAL,
                 "AUTO_TRAIN_MIN_CONFIANZA_WIN": self.AUTO_TRAIN_MIN_CONFIANZA_WIN,
                 "AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN": self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN,
+                "ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA": self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA,
                 "PARES_TRADING": self.PARES_TRADING
             }
 
@@ -15022,6 +15026,10 @@ class TradingManager:
         except Exception:
             pass
         self._cargar_operaciones_cerradas()
+        try:
+            self.iniciar_monitoreo()
+        except Exception:
+            pass
         logger.info("TradingManager inicializado")
 
     def _parse_dt(self, v):
@@ -22796,6 +22804,11 @@ if GUI_AVAILABLE:
                 self.actualizar_estado_conexion(True)
                 self.actualizar_info_cuenta()
                 self.log_mensaje("✅ Conectado a IQ Option")
+                if hasattr(self, 'trading_manager') and self.trading_manager:
+                    try:
+                        self.trading_manager.iniciar_monitoreo()
+                    except Exception:
+                        pass
                 # Iniciar carga de pares en worker
                 QTimer.singleShot(500, self.refrescar_pares_disponibles)
                 QTimer.singleShot(800, self._iniciar_cold_start_ia)
@@ -23626,6 +23639,21 @@ def run_headless_mode():
                         config.PARES_TRADING = nuevos_pares
                         logger.info(f"Pares actualizados: {len(nuevos_pares)}")
                     ultima_actualizacion_pares = time.time()
+
+                # -----------------------------
+                # Sincronización de análisis (2s antes del cierre de vela)
+                # -----------------------------
+                segundos_antes = int(getattr(config, 'ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA', 2) or 2)
+                segundos_antes = max(1, min(10, segundos_antes))
+                ahora_sync = time.time()
+                segundo_actual = float(ahora_sync % 60)
+                objetivo = float(60 - segundos_antes)
+                if segundo_actual < objetivo:
+                    espera = objetivo - segundo_actual
+                else:
+                    espera = (60.0 - segundo_actual) + objetivo
+                if espera > 0.05:
+                    time.sleep(espera)
 
                 # -----------------------------
                 # Verificar límite de trades por sesión
