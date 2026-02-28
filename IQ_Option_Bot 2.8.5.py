@@ -1243,6 +1243,36 @@ def cumple_filtro_aprendizaje(
     return True
 
 
+def validar_alineacion_estricta_operacion(datos: dict, direccion: str) -> bool:
+    """Exige alineación 1m/5m/15m en la misma dirección para ejecutar."""
+    if not isinstance(datos, dict):
+        return False
+    direccion_up = str(direccion or "").upper()
+    if direccion_up not in ("CALL", "PUT"):
+        return False
+
+    indicadores = datos.get("indicadores", {}) or {}
+    alineacion = datos.get("alineacion_tf") or indicadores.get("alineacion_tf") or indicadores.get("alineacion")
+    if not isinstance(alineacion, dict):
+        return False
+
+    if not bool(alineacion.get("alineado", False)):
+        return False
+
+    dir_master = str(alineacion.get("direccion", "")).upper()
+    if dir_master in ("CALL", "PUT") and dir_master != direccion_up:
+        return False
+
+    for tf in ("tf_1m", "tf_5m", "tf_15m"):
+        val = str(alineacion.get(tf, "")).upper()
+        if val not in ("CALL", "PUT"):
+            return False
+        if val != direccion_up:
+            return False
+
+    return True
+
+
 def detectar_patron_wm(df: pd.DataFrame, config) -> dict:
     try:
         if df is None or len(df) < 60:
@@ -2860,13 +2890,17 @@ class ConfiguracionTrading:
         self.PAUSA_AL_STOP_LOSS = True
         self.MAX_TRADES_POR_HORA = 4
         self.MAX_TRADES_POR_DIA = 25
-        self.AUTO_EJECUTAR_BROKER = False
-        self.AUTO_EJECUTAR_MIN_CONFIANZA = 85.0
+        self.AUTO_EJECUTAR_BROKER = True
+        self.AUTO_EJECUTAR_MIN_CONFIANZA = 88.0
         self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = 30
         self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 240
-        self.COOLDOWN_POST_LOSS_SEC = 240
+        self.COOLDOWN_POST_LOSS_SEC = 300
         self.AUTO_EJECUTAR_CONFIRMACIONES = 1
         self.AUTO_EJECUTAR_INTERVALO_VERIFICACION = 5
+        self.CIRCUIT_BREAKER_MAX_PERDIDAS = 3
+        self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT = 0.10
+        self.ENFORCE_SECOND_ZERO_SYNC = True
+        self.EXIGIR_FILTROS_CALIDAD_SENAL = True
         self.RIESGO_POR_OPERACION = 0.02
         self.SISTEMA_COMPUESTO_HABILITADO = False
         self.PORCENTAJE_REINVERSION = 0.5
@@ -3275,6 +3309,24 @@ class ConfiguracionTrading:
                     # Paper Trading mode
                     self.MODO_PAPER_TRADING = data.get(
                         "PAPER_TRADING", self.MODO_PAPER_TRADING)
+                    self.AUTO_EJECUTAR_BROKER = bool(
+                        data.get("AUTO_EJECUTAR_BROKER", self.AUTO_EJECUTAR_BROKER))
+                    self.AUTO_EJECUTAR_MIN_CONFIANZA = float(
+                        data.get("AUTO_EJECUTAR_MIN_CONFIANZA", self.AUTO_EJECUTAR_MIN_CONFIANZA))
+                    self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = int(
+                        data.get("AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG", self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG))
+                    self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = int(
+                        data.get("AUTO_EJECUTAR_COOLDOWN_PAR_SEG", self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG))
+                    self.COOLDOWN_POST_LOSS_SEC = int(
+                        data.get("COOLDOWN_POST_LOSS_SEC", self.COOLDOWN_POST_LOSS_SEC))
+                    self.CIRCUIT_BREAKER_MAX_PERDIDAS = int(
+                        data.get("CIRCUIT_BREAKER_MAX_PERDIDAS", self.CIRCUIT_BREAKER_MAX_PERDIDAS))
+                    self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT = float(
+                        data.get("CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT", self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT))
+                    self.ENFORCE_SECOND_ZERO_SYNC = bool(
+                        data.get("ENFORCE_SECOND_ZERO_SYNC", self.ENFORCE_SECOND_ZERO_SYNC))
+                    self.EXIGIR_FILTROS_CALIDAD_SENAL = bool(
+                        data.get("EXIGIR_FILTROS_CALIDAD_SENAL", self.EXIGIR_FILTROS_CALIDAD_SENAL))
 
                     logger.info(f"Configuración cargada desde {archivo}")
 
@@ -3330,6 +3382,15 @@ class ConfiguracionTrading:
                 "MAX_TRADES_SESION": self.MAX_TRADES_SESION,
                 "TIPO_CUENTA": self.TIPO_CUENTA,
                 "PAPER_TRADING": self.MODO_PAPER_TRADING,
+                "AUTO_EJECUTAR_BROKER": self.AUTO_EJECUTAR_BROKER,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": self.AUTO_EJECUTAR_MIN_CONFIANZA,
+                "AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG": self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG,
+                "COOLDOWN_POST_LOSS_SEC": self.COOLDOWN_POST_LOSS_SEC,
+                "CIRCUIT_BREAKER_MAX_PERDIDAS": self.CIRCUIT_BREAKER_MAX_PERDIDAS,
+                "CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT": self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT,
+                "ENFORCE_SECOND_ZERO_SYNC": self.ENFORCE_SECOND_ZERO_SYNC,
+                "EXIGIR_FILTROS_CALIDAD_SENAL": self.EXIGIR_FILTROS_CALIDAD_SENAL,
                 "PARES_TRADING": self.PARES_TRADING
             }
 
@@ -8890,8 +8951,22 @@ class SeguimientoSenales:
             except Exception:
                 pass
 
+        trading_manager = getattr(self, "trading_manager", None)
+        if trading_manager and hasattr(trading_manager, "circuit_breaker"):
+            if bool(getattr(trading_manager.circuit_breaker, "bloqueado", False)):
+                self.logger.warning("⛔ Circuit breaker activo: auto-ejecución pausada")
+                return
+
         # Ejecutar orden
         duracion = int(getattr(self.config, "TIEMPO_EXPIRACION", 5) or 5)
+        if bool(getattr(self.config, "ENFORCE_SECOND_ZERO_SYNC", True)):
+            try:
+                ts_srv = float(self.human_executor._get_server_time(getattr(self.iq_bridge, "api", None)))
+                wait = float(60 - (ts_srv % 60)) % 60
+                if 0.25 < wait <= 15.0:
+                    time.sleep(wait)
+            except Exception:
+                pass
         order_id = self.human_executor.ejecutar_orden_humana(
             self.iq_bridge.api,
             par,
@@ -8977,11 +9052,15 @@ class SeguimientoSenales:
 
         # Feedback a la IA
         try:
-            if self.ai_engine:
-                if cumple_filtro_aprendizaje(self.config, senal.get("direccion"),
-                                             senal.get("indicadores", {}) or {}):
+            if self.ai_engine and is_win:
+                conf_trade = float(
+                    senal.get("confianza_actual", senal.get("confianza", 0.0)) or 0.0)
+                if conf_trade >= 88.0 and cumple_filtro_aprendizaje(
+                        self.config,
+                        senal.get("direccion"),
+                        senal.get("indicadores", {}) or {}):
                     self.ai_engine.learn_from_result(
-                        is_win, senal.get("direccion"))
+                        True, senal.get("direccion"))
         except Exception as e:
             self.logger.error(
                 f"❌ Error enviando feedback a IA: {e}",
@@ -14915,7 +14994,10 @@ class TradingManager:
         self.monitor_thread = None
         
         # ✅ FIX: Circuit Breaker
-        self.circuit_breaker = CircuitBreaker()
+        self.circuit_breaker = CircuitBreaker(
+            max_perdidas_consecutivas=int(getattr(self.config, "CIRCUIT_BREAKER_MAX_PERDIDAS", 3) or 3),
+            max_drawdown_pct=float(getattr(self.config, "CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT", 0.10) or 0.10)
+        )
         
         # Referencias a componentes clave para integración
         self.ensemble_predictor = EnsemblePredictor(
@@ -22802,6 +22884,31 @@ if GUI_AVAILABLE:
                             "REAL") or "REAL").upper()
                     if tipo != "REAL":
                         continue
+                    if not validar_alineacion_estricta_operacion(datos, accion):
+                        continue
+                    if bool(getattr(self.config, "EXIGIR_FILTROS_CALIDAD_SENAL", True)):
+                        volatilidad = datos.get("volatilidad")
+                        if volatilidad is None:
+                            volatilidad = (datos.get("indicadores", {}) or {}).get("volatilidad")
+                        try:
+                            vol_val = float(volatilidad) if volatilidad is not None else None
+                        except Exception:
+                            vol_val = None
+                        if vol_val is not None and (vol_val <= 0.01 or vol_val >= 4.5):
+                            continue
+
+                        sesion = str(datos.get("sesion") or (datos.get("indicadores", {}) or {}).get("sesion") or "").upper()
+                        if sesion in ("CIERRE", "UNKNOWN", "SIN_SESION"):
+                            continue
+
+                        hay_noticias = bool(
+                            datos.get("hay_noticias")
+                            or (datos.get("indicadores", {}) or {}).get("hay_noticias")
+                            or datos.get("news_high_impact")
+                            or (datos.get("indicadores", {}) or {}).get("news_high_impact")
+                        )
+                        if hay_noticias:
+                            continue
                     last_par = float(
                         self._auto_exec_last_par.get(
                             par, 0.0) or 0.0)
