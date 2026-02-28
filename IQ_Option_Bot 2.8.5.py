@@ -2854,7 +2854,7 @@ class ConfiguracionTrading:
         # TRADING (BASE)
         # ==========================================
         self.AUTO_TRADING_HABILITADO = True
-        self.MODO_PAPER_TRADING = False
+        self.MODO_PAPER_TRADING = True
         self.MONTO_OPERACION = 1.0
         self.PORCENTAJE_INVERSION = 0.1
         self.MAX_OPERACIONES_SIMULTANEAS = 1
@@ -2899,7 +2899,7 @@ class ConfiguracionTrading:
         self.AUTO_EJECUTAR_CONFIRMACIONES = 1
         self.AUTO_EJECUTAR_INTERVALO_VERIFICACION = 5
         self.CIRCUIT_BREAKER_MAX_PERDIDAS = 3
-        self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT = 0.10
+        self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT = 0.15
         self.ENFORCE_SECOND_ZERO_SYNC = True
         self.EXIGIR_FILTROS_CALIDAD_SENAL = True
         self.RIESGO_POR_OPERACION = 0.02
@@ -8397,6 +8397,7 @@ class SeguimientoSenales:
         self._ultimo_trade_por_par = {}
         self._trades_dia = 0
         self._ultimo_loss_ts = 0.0
+        self._losses_consecutivas = 0
 
         # Monitoreo binario
         self.monitoreo_binario_activo = False
@@ -8894,7 +8895,7 @@ class SeguimientoSenales:
             self._trades_dia = 0
         # Cooldown post pérdida global (anti-congelamiento y sobreoperación)
         cd_loss = int(getattr(self.config, "COOLDOWN_POST_LOSS_SEC", 0) or 0)
-        if cd_loss > 0 and float(self._ultimo_loss_ts or 0) > 0:
+        if cd_loss > 0 and int(getattr(self, "_losses_consecutivas", 0) or 0) >= 2 and float(self._ultimo_loss_ts or 0) > 0:
             if (datetime.now().timestamp() - float(self._ultimo_loss_ts)) < cd_loss:
                 return
 
@@ -9016,8 +9017,12 @@ class SeguimientoSenales:
         # Determinar estado final
         is_win = beneficio > 0
         estado_final = 'WIN' if is_win else 'LOSS'
-        if not is_win:
-            self._ultimo_loss_ts = datetime.now().timestamp()
+        if is_win:
+            self._losses_consecutivas = 0
+        else:
+            self._losses_consecutivas = int(getattr(self, "_losses_consecutivas", 0) or 0) + 1
+            if self._losses_consecutivas >= 2:
+                self._ultimo_loss_ts = datetime.now().timestamp()
 
         # Actualizar estadísticas
         with self.lock:
@@ -14967,7 +14972,7 @@ class TradingManager:
         # ✅ FIX: Circuit Breaker
         self.circuit_breaker = CircuitBreaker(
             max_perdidas_consecutivas=int(getattr(self.config, "CIRCUIT_BREAKER_MAX_PERDIDAS", 3) or 3),
-            max_drawdown_pct=float(getattr(self.config, "CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT", 0.10) or 0.10)
+            max_drawdown_pct=float(getattr(self.config, "CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT", 0.15) or 0.15)
         )
         
         # Referencias a componentes clave para integración
