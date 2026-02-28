@@ -2548,13 +2548,14 @@ class MotorTradingIntegrado:
         monto = self.config.calcular_monto_operacion()
         duracion_min = expiracion_segundos // 60
 
-        return self.executor_humano.ejecutar_orden_humana(
-            api=self.iq_bridge.api,
-            simbolo=par,
-            direccion=decision["accion"],
-            monto=monto,
-            duracion=duracion_min
+        direccion = "call" if str(decision["accion"]).upper() == "CALL" else "put"
+        order_id, _err = self.iq_bridge.ejecutar_orden(
+            par,
+            monto,
+            direccion,
+            int(duracion_min or 1)
         )
+        return order_id
 
     # ==========================================================
     # UTIL
@@ -2870,7 +2871,7 @@ class ConfiguracionTrading:
         self.MODO_PRODUCCION = False          # 🔒 OFF por defecto
         self.AUTO_TRADING = True             # Control maestro
         self.AUTO_TRADING_HABILITADO = True  # Flag usado por ejecución binaria
-        self.USAR_EJECUTOR_HUMANO = True      # Anti-baneo
+        self.USAR_EJECUTOR_HUMANO = False      # Ejecución API directa (sin emulación GUI)
         self.DRY_RUN = False                   # Simulación segura
         self.KILL_SWITCH = False              # Corte inmediato
 
@@ -2933,7 +2934,7 @@ class ConfiguracionTrading:
         # ==========================================
         # OPCIONES DE EMULACIÓN HUMANA
         # ==========================================
-        self.HABILITAR_EMULACION_HUMANA = True
+        self.HABILITAR_EMULACION_HUMANA = False
 
         try:
             if not os.path.exists(self.RUTA_CACHE_DATOS):
@@ -8961,17 +8962,17 @@ class SeguimientoSenales:
         duracion = int(getattr(self.config, "TIEMPO_EXPIRACION", 5) or 5)
         if bool(getattr(self.config, "ENFORCE_SECOND_ZERO_SYNC", True)):
             try:
-                ts_srv = float(self.human_executor._get_server_time(getattr(self.iq_bridge, "api", None)))
+                ts_srv = float(time.time())
                 wait = float(60 - (ts_srv % 60)) % 60
                 if 0.25 < wait <= 15.0:
                     time.sleep(wait)
             except Exception:
                 pass
-        order_id = self.human_executor.ejecutar_orden_humana(
-            self.iq_bridge.api,
+        direccion_buy = "call" if str(senal['direccion']).upper() == "CALL" else "put"
+        order_id, _err_orden = self.iq_bridge.ejecutar_orden(
             par,
-            senal['direccion'],
             monto,
+            direccion_buy,
             duracion
         )
 
@@ -11087,29 +11088,6 @@ class IQOptionBridge:
             return None, "API no inicializada"
 
         try:
-            usar_emulacion = bool(
-                getattr(
-                    self.config,
-                    "HABILITAR_EMULACION_HUMANA",
-                    True)) and bool(
-                getattr(
-                    self.config,
-                    "USAR_EJECUTOR_HUMANO",
-                    True))
-            if usar_emulacion and hasattr(self, "human_executor") and self.human_executor and hasattr(
-                    self.human_executor, "ejecutar_orden_humana"):
-                direccion_l = str(direccion).lower()
-                direccion_emul = "CALL" if direccion_l == "call" else "PUT" if direccion_l == "put" else str(
-                    direccion).upper()
-                order_id_emul = self.human_executor.ejecutar_orden_humana(
-                    self.api, activo, direccion_emul, float(monto), int(duracion or 5))
-                if order_id_emul is not None:
-                    logger.info(
-                        f"✅ Orden ejecutada (emulación): {activo} {direccion_l} ${monto} | ID: {order_id_emul}")
-                    return int(order_id_emul), None
-                logger.warning(
-                    f"❌ Fallo al ejecutar orden (emulación): {activo} {direccion_l} ${monto}")
-
             check, order_id = False, None
 
             # Asegurar que direccion sea 'call' o 'put' (minúsculas)
@@ -14229,47 +14207,32 @@ class IQOptionBridge:
             duration = self.config.TIEMPO_EXPIRACION  # Siempre 5 minutos
             logger.info(
                 f"Enviando orden: {simbolo} {direction} ${monto} duración={duration}min (OTC={es_otc})")
-            usar_emulacion = bool(
-                getattr(
-                    self.config,
-                    "HABILITAR_EMULACION_HUMANA",
-                    True)) and bool(
-                getattr(
-                    self.config,
-                    "USAR_EJECUTOR_HUMANO",
-                    True))
             order_id = None
-            if usar_emulacion and hasattr(self, "human_executor") and self.human_executor and hasattr(
-                    self.human_executor, "ejecutar_orden_humana"):
-                direccion_emul = "CALL" if direction == "call" else "PUT"
-                order_id = self.human_executor.ejecutar_orden_humana(
-                    self.api, simbolo, direccion_emul, float(monto), int(duration or 5))
+            if hasattr(self.api, 'buy'):
+                result = self.api.buy(monto, simbolo, direction, duration)
             else:
-                if hasattr(self.api, 'buy'):
-                    result = self.api.buy(monto, simbolo, direction, duration)
-                else:
+                logger.error(
+                    "No se encontró un método para enviar órdenes en la API")
+                return None
+            if isinstance(result, tuple):
+                check, oid = result
+                if not check:
                     logger.error(
-                        "No se encontró un método para enviar órdenes en la API")
+                        "Error enviando orden binaria a IQ Option (check=False)")
                     return None
-                if isinstance(result, tuple):
-                    check, oid = result
-                    if not check:
-                        logger.error(
-                            "Error enviando orden binaria a IQ Option (check=False)")
-                        return None
-                    order_id = oid
-                elif isinstance(result, dict):
-                    check = result.get('check', result.get('success', False))
-                    order_id = result.get('id')
-                    if not check:
-                        logger.error(
-                            "Error enviando orden binaria a IQ Option")
-                        return None
-                else:
+                order_id = oid
+            elif isinstance(result, dict):
+                check = result.get('check', result.get('success', False))
+                order_id = result.get('id')
+                if not check:
                     logger.error(
-                        f"Resultado de buy() inesperado: {
-                            type(result)} - {result}")
+                        "Error enviando orden binaria a IQ Option")
                     return None
+            else:
+                logger.error(
+                    f"Resultado de buy() inesperado: {
+                        type(result)} - {result}")
+                return None
             if order_id is None:
                 logger.error("La orden no devolvió un ID válido")
                 return None
@@ -20430,6 +20393,11 @@ if GUI_AVAILABLE:
                         'GUI_LIVE_UPDATE_INTERVAL_MS',
                         4000) or 4000)
                 self.timer_vivo.start(max(500, intervalo))
+
+            if not hasattr(self, 'timer_refresh_pares') or self.timer_refresh_pares is None:
+                self.timer_refresh_pares = QTimer()
+                self.timer_refresh_pares.timeout.connect(self._refresh_pares_periodico)
+                self.timer_refresh_pares.start(5 * 60 * 1000)
             # ==========================================
             # MÉTODO DE ESCANEO (Pon esto dentro de tu clase)
             # ==========================================
@@ -20853,40 +20821,16 @@ if GUI_AVAILABLE:
                     if resultado['accion'] in ['CALL', 'PUT']:
                         direction = resultado['accion'].lower()
                         id_compra = None
-                        try:
-                            usar_emulacion = bool(
-                                getattr(
-                                    self.config,
-                                    "HABILITAR_EMULACION_HUMANA",
-                                    True)) and bool(
-                                getattr(
-                                    self.config,
-                                    "USAR_EJECUTOR_HUMANO",
-                                    True))
-                        except Exception:
-                            usar_emulacion = True
-                        if usar_emulacion:
-                            try:
-                                if not hasattr(
-                                        self, "human_executor") or self.human_executor is None:
-                                    self.human_executor = HumanMouseExecutor()
-                            except Exception:
-                                self.human_executor = HumanMouseExecutor()
-                            id_compra = self.human_executor.ejecutar_orden_humana(
-                                self.api, self.config.ACTIVO, resultado['accion'], float(
-                                    self.config.MONTO_OPERACION), int(
-                                    self.config.TIEMPO_EXPIRACION or 5))
-                        else:
-                            res = self.api.buy(
-                                float(
-                                    self.config.MONTO_OPERACION), self.config.ACTIVO, direction, int(
-                                    self.config.TIEMPO_EXPIRACION or 5))
-                            if isinstance(res, tuple) and len(res) >= 2:
-                                ok, oid = res[0], res[1]
-                                if ok and oid:
-                                    id_compra = oid
-                            elif res:
-                                id_compra = res
+                        res = self.api.buy(
+                            float(
+                                self.config.MONTO_OPERACION), self.config.ACTIVO, direction, int(
+                                self.config.TIEMPO_EXPIRACION or 5))
+                        if isinstance(res, tuple) and len(res) >= 2:
+                            ok, oid = res[0], res[1]
+                            if ok and oid:
+                                id_compra = oid
+                        elif res:
+                            id_compra = res
 
                         if id_compra:
                             self.log_message(
@@ -22824,6 +22768,14 @@ if GUI_AVAILABLE:
             self.btn_conectar.setEnabled(True)
             self.btn_conectar.setText("🔌 Conectar")
 
+        def _refresh_pares_periodico(self):
+            """Refresca pares disponibles cada 5 minutos para robustez 24/7."""
+            try:
+                if getattr(self.iq_bridge, "connected", False):
+                    self.refrescar_pares_disponibles()
+            except Exception:
+                return
+
         def _start_live_updates(self):
             try:
                 if not getattr(self.iq_bridge, "connected", False):
@@ -23595,7 +23547,7 @@ def run_headless_mode():
         logger.info("Iniciando loop de trading (Ctrl+C para detener)")
 
         ultima_actualizacion_pares = time.time()
-        INTERVALO_REFRESH_PARES = 15 * 60  # 15 minutos
+        INTERVALO_REFRESH_PARES = 5 * 60  # 5 minutos
 
         while True:
             try:
