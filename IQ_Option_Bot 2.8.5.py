@@ -1243,6 +1243,36 @@ def cumple_filtro_aprendizaje(
     return True
 
 
+def validar_alineacion_estricta_operacion(datos: dict, direccion: str) -> bool:
+    """Exige alineación 1m/5m/15m en la misma dirección para ejecutar."""
+    if not isinstance(datos, dict):
+        return False
+    direccion_up = str(direccion or "").upper()
+    if direccion_up not in ("CALL", "PUT"):
+        return False
+
+    indicadores = datos.get("indicadores", {}) or {}
+    alineacion = datos.get("alineacion_tf") or indicadores.get("alineacion_tf") or indicadores.get("alineacion")
+    if not isinstance(alineacion, dict):
+        return False
+
+    if not bool(alineacion.get("alineado", False)):
+        return False
+
+    dir_master = str(alineacion.get("direccion", "")).upper()
+    if dir_master in ("CALL", "PUT") and dir_master != direccion_up:
+        return False
+
+    for tf in ("tf_1m", "tf_5m", "tf_15m"):
+        val = str(alineacion.get(tf, "")).upper()
+        if val not in ("CALL", "PUT"):
+            return False
+        if val != direccion_up:
+            return False
+
+    return True
+
+
 def detectar_patron_wm(df: pd.DataFrame, config) -> dict:
     try:
         if df is None or len(df) < 60:
@@ -2518,13 +2548,14 @@ class MotorTradingIntegrado:
         monto = self.config.calcular_monto_operacion()
         duracion_min = expiracion_segundos // 60
 
-        return self.executor_humano.ejecutar_orden_humana(
-            api=self.iq_bridge.api,
-            simbolo=par,
-            direccion=decision["accion"],
-            monto=monto,
-            duracion=duracion_min
+        direccion = "call" if str(decision["accion"]).upper() == "CALL" else "put"
+        order_id, _err = self.iq_bridge.ejecutar_orden(
+            par,
+            monto,
+            direccion,
+            int(duracion_min or 1)
         )
+        return order_id
 
     # ==========================================================
     # UTIL
@@ -2760,7 +2791,7 @@ class ConfiguracionTrading:
         # ==========================================
         # CUENTA
         # ==========================================
-        self.TIPO_CUENTA = "PRACTICE"
+        self.TIPO_CUENTA = "REAL"
         self.RUTA_CREDENCIALES_IQ = "iq_creds.json"
 
         # ==========================================
@@ -2807,10 +2838,10 @@ class ConfiguracionTrading:
         # UMBRALES DE SEÑALES (OPTIMIZADOS PARA 85%+ WIN RATE)
         # ==========================================
         # Triple confirmación requerida: 1M + 5M + 15M en misma dirección
-        self.UMBRAL_SEÑAL_DESTACADA = 85.0      # Mínimo para considerar señal
+        self.UMBRAL_SEÑAL_DESTACADA = 88.0      # Mínimo para considerar señal
         self.UMBRAL_SEÑAL_CONFIRMADA = 90.0     # Señal fuerte
         self.UMBRAL_SEÑAL_EXCELENTE = 95.0      # Señal premium
-        self.UMBRAL_COMPRA = 85.0               # Mínimo para operar (antes 55%)
+        self.UMBRAL_COMPRA = 88.0               # Mínimo para operar (alta precisión)
         self.UMBRAL_IA_DIRECCION = 60.0         # IA debe tener >60% confianza
         self.UMBRAL_TECNICO_DIRECCION = 55.0    # Técnico debe tener >55%
         
@@ -2837,10 +2868,10 @@ class ConfiguracionTrading:
         # ==========================================
         # 🛡️ PASO 3.4 – CONTROL DE PRODUCCIÓN
         # ==========================================
-        self.MODO_PRODUCCION = False          # 🔒 OFF por defecto
+        self.MODO_PRODUCCION = True          # ✅ ON por defecto (modo productivo)
         self.AUTO_TRADING = True             # Control maestro
         self.AUTO_TRADING_HABILITADO = True  # Flag usado por ejecución binaria
-        self.USAR_EJECUTOR_HUMANO = True      # Anti-baneo
+        self.USAR_EJECUTOR_HUMANO = False      # Ejecución API directa (sin emulación GUI)
         self.DRY_RUN = False                   # Simulación segura
         self.KILL_SWITCH = False              # Corte inmediato
 
@@ -2860,14 +2891,21 @@ class ConfiguracionTrading:
         self.PAUSA_AL_STOP_LOSS = True
         self.MAX_TRADES_POR_HORA = 4
         self.MAX_TRADES_POR_DIA = 25
-        self.AUTO_EJECUTAR_BROKER = False
-        self.AUTO_EJECUTAR_MIN_CONFIANZA = 85.0
+        self.AUTO_EJECUTAR_BROKER = True
+        self.AUTO_EJECUTAR_MIN_CONFIANZA = 88.0
         self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = 30
         self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = 240
-        self.COOLDOWN_POST_LOSS_SEC = 240
+        self.COOLDOWN_POST_LOSS_SEC = 300
         self.AUTO_EJECUTAR_CONFIRMACIONES = 1
         self.AUTO_EJECUTAR_INTERVALO_VERIFICACION = 5
+        self.CIRCUIT_BREAKER_MAX_PERDIDAS = 3
+        self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT = 0.15
+        self.ENFORCE_SECOND_ZERO_SYNC = True
+        self.EXIGIR_FILTROS_CALIDAD_SENAL = True
         self.RIESGO_POR_OPERACION = 0.02
+        self.AUTO_TRAIN_MIN_CONFIANZA_WIN = 88.0
+        self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN = 21
+        self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA = 2
         self.SISTEMA_COMPUESTO_HABILITADO = False
         self.PORCENTAJE_REINVERSION = 0.5
         self.HORARIO_TRADING_HABILITADO = False
@@ -2899,7 +2937,7 @@ class ConfiguracionTrading:
         # ==========================================
         # OPCIONES DE EMULACIÓN HUMANA
         # ==========================================
-        self.HABILITAR_EMULACION_HUMANA = True
+        self.HABILITAR_EMULACION_HUMANA = False
 
         try:
             if not os.path.exists(self.RUTA_CACHE_DATOS):
@@ -3275,6 +3313,30 @@ class ConfiguracionTrading:
                     # Paper Trading mode
                     self.MODO_PAPER_TRADING = data.get(
                         "PAPER_TRADING", self.MODO_PAPER_TRADING)
+                    self.AUTO_EJECUTAR_BROKER = bool(
+                        data.get("AUTO_EJECUTAR_BROKER", self.AUTO_EJECUTAR_BROKER))
+                    self.AUTO_EJECUTAR_MIN_CONFIANZA = float(
+                        data.get("AUTO_EJECUTAR_MIN_CONFIANZA", self.AUTO_EJECUTAR_MIN_CONFIANZA))
+                    self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = int(
+                        data.get("AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG", self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG))
+                    self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = int(
+                        data.get("AUTO_EJECUTAR_COOLDOWN_PAR_SEG", self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG))
+                    self.COOLDOWN_POST_LOSS_SEC = int(
+                        data.get("COOLDOWN_POST_LOSS_SEC", self.COOLDOWN_POST_LOSS_SEC))
+                    self.CIRCUIT_BREAKER_MAX_PERDIDAS = int(
+                        data.get("CIRCUIT_BREAKER_MAX_PERDIDAS", self.CIRCUIT_BREAKER_MAX_PERDIDAS))
+                    self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT = float(
+                        data.get("CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT", self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT))
+                    self.ENFORCE_SECOND_ZERO_SYNC = bool(
+                        data.get("ENFORCE_SECOND_ZERO_SYNC", self.ENFORCE_SECOND_ZERO_SYNC))
+                    self.EXIGIR_FILTROS_CALIDAD_SENAL = bool(
+                        data.get("EXIGIR_FILTROS_CALIDAD_SENAL", self.EXIGIR_FILTROS_CALIDAD_SENAL))
+                    self.AUTO_TRAIN_MIN_CONFIANZA_WIN = float(
+                        data.get("AUTO_TRAIN_MIN_CONFIANZA_WIN", self.AUTO_TRAIN_MIN_CONFIANZA_WIN))
+                    self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN = int(
+                        data.get("AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN", self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN))
+                    self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA = int(
+                        data.get("ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA", self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA))
 
                     logger.info(f"Configuración cargada desde {archivo}")
 
@@ -3330,6 +3392,18 @@ class ConfiguracionTrading:
                 "MAX_TRADES_SESION": self.MAX_TRADES_SESION,
                 "TIPO_CUENTA": self.TIPO_CUENTA,
                 "PAPER_TRADING": self.MODO_PAPER_TRADING,
+                "AUTO_EJECUTAR_BROKER": self.AUTO_EJECUTAR_BROKER,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": self.AUTO_EJECUTAR_MIN_CONFIANZA,
+                "AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG": self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG,
+                "COOLDOWN_POST_LOSS_SEC": self.COOLDOWN_POST_LOSS_SEC,
+                "CIRCUIT_BREAKER_MAX_PERDIDAS": self.CIRCUIT_BREAKER_MAX_PERDIDAS,
+                "CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT": self.CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT,
+                "ENFORCE_SECOND_ZERO_SYNC": self.ENFORCE_SECOND_ZERO_SYNC,
+                "EXIGIR_FILTROS_CALIDAD_SENAL": self.EXIGIR_FILTROS_CALIDAD_SENAL,
+                "AUTO_TRAIN_MIN_CONFIANZA_WIN": self.AUTO_TRAIN_MIN_CONFIANZA_WIN,
+                "AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN": self.AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN,
+                "ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA": self.ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA,
                 "PARES_TRADING": self.PARES_TRADING
             }
 
@@ -4212,6 +4286,19 @@ class OperationsRepository:
                 alineacion_tf = None
             if not exitoso:
                 return
+
+            conf_raw = trade.get('confianza', trade.get('probabilidad', trade.get('probabilidad_predicha', 0.0)))
+            try:
+                conf_val = float(conf_raw)
+            except Exception:
+                conf_val = 0.0
+            if conf_val <= 1.0:
+                conf_pct = conf_val * 100.0
+            else:
+                conf_pct = conf_val
+            if conf_pct < 88.0:
+                return
+
             trade_record = {
                 'id': len(self.trades) + 1,
                 'timestamp': datetime.now().isoformat(),
@@ -8335,6 +8422,7 @@ class SeguimientoSenales:
         self._ultimo_trade_por_par = {}
         self._trades_dia = 0
         self._ultimo_loss_ts = 0.0
+        self._losses_consecutivas = 0
 
         # Monitoreo binario
         self.monitoreo_binario_activo = False
@@ -8832,7 +8920,7 @@ class SeguimientoSenales:
             self._trades_dia = 0
         # Cooldown post pérdida global (anti-congelamiento y sobreoperación)
         cd_loss = int(getattr(self.config, "COOLDOWN_POST_LOSS_SEC", 0) or 0)
-        if cd_loss > 0 and float(self._ultimo_loss_ts or 0) > 0:
+        if cd_loss > 0 and int(getattr(self, "_losses_consecutivas", 0) or 0) >= 2 and float(self._ultimo_loss_ts or 0) > 0:
             if (datetime.now().timestamp() - float(self._ultimo_loss_ts)) < cd_loss:
                 return
 
@@ -8890,13 +8978,27 @@ class SeguimientoSenales:
             except Exception:
                 pass
 
+        trading_manager = getattr(self, "trading_manager", None)
+        if trading_manager and hasattr(trading_manager, "circuit_breaker"):
+            if bool(getattr(trading_manager.circuit_breaker, "bloqueado", False)):
+                self.logger.warning("⛔ Circuit breaker activo: auto-ejecución pausada")
+                return
+
         # Ejecutar orden
         duracion = int(getattr(self.config, "TIEMPO_EXPIRACION", 5) or 5)
-        order_id = self.human_executor.ejecutar_orden_humana(
-            self.iq_bridge.api,
+        if bool(getattr(self.config, "ENFORCE_SECOND_ZERO_SYNC", True)):
+            try:
+                ts_srv = float(time.time())
+                wait = float(60 - (ts_srv % 60)) % 60
+                if 0.25 < wait <= 15.0:
+                    time.sleep(wait)
+            except Exception:
+                pass
+        direccion_buy = "call" if str(senal['direccion']).upper() == "CALL" else "put"
+        order_id, _err_orden = self.iq_bridge.ejecutar_orden(
             par,
-            senal['direccion'],
             monto,
+            direccion_buy,
             duracion
         )
 
@@ -8940,8 +9042,12 @@ class SeguimientoSenales:
         # Determinar estado final
         is_win = beneficio > 0
         estado_final = 'WIN' if is_win else 'LOSS'
-        if not is_win:
-            self._ultimo_loss_ts = datetime.now().timestamp()
+        if is_win:
+            self._losses_consecutivas = 0
+        else:
+            self._losses_consecutivas = int(getattr(self, "_losses_consecutivas", 0) or 0) + 1
+            if self._losses_consecutivas >= 2:
+                self._ultimo_loss_ts = datetime.now().timestamp()
 
         # Actualizar estadísticas
         with self.lock:
@@ -8977,11 +9083,15 @@ class SeguimientoSenales:
 
         # Feedback a la IA
         try:
-            if self.ai_engine:
-                if cumple_filtro_aprendizaje(self.config, senal.get("direccion"),
-                                             senal.get("indicadores", {}) or {}):
+            if self.ai_engine and is_win:
+                conf_trade = float(
+                    senal.get("confianza_actual", senal.get("confianza", 0.0)) or 0.0)
+                if conf_trade >= 88.0 and cumple_filtro_aprendizaje(
+                        self.config,
+                        senal.get("direccion"),
+                        senal.get("indicadores", {}) or {}):
                     self.ai_engine.learn_from_result(
-                        is_win, senal.get("direccion"))
+                        True, senal.get("direccion"))
         except Exception as e:
             self.logger.error(
                 f"❌ Error enviando feedback a IA: {e}",
@@ -9119,13 +9229,15 @@ class AutoTrainer:
         self.config = config
         self.ultimo_entrenamiento = None
         # Mínimo de trades para reentrenar se camnio el 50 por 5
-        self.min_trades_para_entrenar = 5
+        self.min_trades_para_entrenar = int(getattr(self.config, "AUTO_TRAIN_MIN_NUEVOS_PATRONES_WIN", 21) or 21)
         self.modelo_actual = None
         self.precision_objetivo = 0.92
         self.precision_actual = 0.5
         self.perfil_actual = None
         self.escalador = None
         self.n_features = None
+        self._ultimo_total_trades_entrenados = 0
+        self.min_confianza_win = float(getattr(self.config, "AUTO_TRAIN_MIN_CONFIANZA_WIN", 88.0) or 88.0)
         # Rutas dinámicas según perfil
         self._actualizar_rutas_segun_perfil()
         # Cargar modelo existente si hay
@@ -9175,14 +9287,13 @@ class AutoTrainer:
                 if horas_desde_ultimo < self.intervalo_horas:
                     return False
 
-            # Verificar si hay suficientes trades
+            # Verificar si hay suficientes patrones ganadores nuevos
             stats = self.operations_repo.obtener_estadisticas()
-            if stats.get('total_trades', 0) < self.min_trades_para_entrenar:
+            total_wins = int(stats.get('trades_exitosos', stats.get('total_trades', 0)) or 0)
+            nuevos_wins = total_wins - int(self._ultimo_total_trades_entrenados or 0)
+            if nuevos_wins < self.min_trades_para_entrenar:
                 logger.info(
-                    f"Insuficientes trades para reentrenar ({
-                        stats.get(
-                            'total_trades', 0)}/{
-                        self.min_trades_para_entrenar})")
+                    f"Insuficientes patrones WIN nuevos para reentrenar ({nuevos_wins}/{self.min_trades_para_entrenar})")
                 return False
 
             logger.info("Iniciando reentrenamiento automático...")
@@ -9196,6 +9307,8 @@ class AutoTrainer:
             exito = self._entrenar_modelo(dataset)
             if exito:
                 self.ultimo_entrenamiento = ahora
+                self._ultimo_total_trades_entrenados = int(
+                    self.operations_repo.obtener_estadisticas().get('trades_exitosos', 0) or 0)
                 logger.info("Reentrenamiento completado exitosamente")
                 return True
             return False
@@ -9213,6 +9326,17 @@ class AutoTrainer:
             # Convertir trades a DataFrame con características extendidas
             registros = []
             for trade in trades:
+                if not bool(trade.get('exitoso', False)):
+                    continue
+                conf_raw = trade.get('confianza', trade.get('probabilidad_predicha', trade.get('probabilidad', 0.0)))
+                try:
+                    conf_val = float(conf_raw)
+                except Exception:
+                    conf_val = 0.0
+                conf_pct = conf_val * 100.0 if conf_val <= 1.0 else conf_val
+                if conf_pct < self.min_confianza_win:
+                    continue
+
                 indicadores = trade.get('indicadores', {})
                 # Características principales
                 rsi = indicadores.get('RSI', 50)
@@ -11008,29 +11132,6 @@ class IQOptionBridge:
             return None, "API no inicializada"
 
         try:
-            usar_emulacion = bool(
-                getattr(
-                    self.config,
-                    "HABILITAR_EMULACION_HUMANA",
-                    True)) and bool(
-                getattr(
-                    self.config,
-                    "USAR_EJECUTOR_HUMANO",
-                    True))
-            if usar_emulacion and hasattr(self, "human_executor") and self.human_executor and hasattr(
-                    self.human_executor, "ejecutar_orden_humana"):
-                direccion_l = str(direccion).lower()
-                direccion_emul = "CALL" if direccion_l == "call" else "PUT" if direccion_l == "put" else str(
-                    direccion).upper()
-                order_id_emul = self.human_executor.ejecutar_orden_humana(
-                    self.api, activo, direccion_emul, float(monto), int(duracion or 5))
-                if order_id_emul is not None:
-                    logger.info(
-                        f"✅ Orden ejecutada (emulación): {activo} {direccion_l} ${monto} | ID: {order_id_emul}")
-                    return int(order_id_emul), None
-                logger.warning(
-                    f"❌ Fallo al ejecutar orden (emulación): {activo} {direccion_l} ${monto}")
-
             check, order_id = False, None
 
             # Asegurar que direccion sea 'call' o 'put' (minúsculas)
@@ -11527,10 +11628,18 @@ class IQOptionBridge:
             logger.debug(f"Error sync get products: {e}")
         return None
 
-    def connect(self) -> bool:
-        """Establece una conexión a IQ Option usando API estable (prioridad) o async."""
+    def connect(self, email: Optional[str] = None, password: Optional[str] = None,
+                tipo_cuenta: Optional[str] = None) -> bool:
+        """Establece conexión a IQ Option usando credenciales explícitas o almacenadas."""
         try:
-            email, password = self._cargar_credenciales()
+            if tipo_cuenta in ("PRACTICE", "REAL"):
+                self.tipo_cuenta_actual = str(tipo_cuenta).upper()
+                self.config.TIPO_CUENTA = self.tipo_cuenta_actual
+
+            email = (email or "").strip()
+            password = (password or "").strip()
+            if not email or not password:
+                email, password = self._cargar_credenciales()
             if not email or not password:
                 logger.error("Credenciales de IQ Option no encontradas")
                 return False
@@ -14142,47 +14251,32 @@ class IQOptionBridge:
             duration = self.config.TIEMPO_EXPIRACION  # Siempre 5 minutos
             logger.info(
                 f"Enviando orden: {simbolo} {direction} ${monto} duración={duration}min (OTC={es_otc})")
-            usar_emulacion = bool(
-                getattr(
-                    self.config,
-                    "HABILITAR_EMULACION_HUMANA",
-                    True)) and bool(
-                getattr(
-                    self.config,
-                    "USAR_EJECUTOR_HUMANO",
-                    True))
             order_id = None
-            if usar_emulacion and hasattr(self, "human_executor") and self.human_executor and hasattr(
-                    self.human_executor, "ejecutar_orden_humana"):
-                direccion_emul = "CALL" if direction == "call" else "PUT"
-                order_id = self.human_executor.ejecutar_orden_humana(
-                    self.api, simbolo, direccion_emul, float(monto), int(duration or 5))
+            if hasattr(self.api, 'buy'):
+                result = self.api.buy(monto, simbolo, direction, duration)
             else:
-                if hasattr(self.api, 'buy'):
-                    result = self.api.buy(monto, simbolo, direction, duration)
-                else:
+                logger.error(
+                    "No se encontró un método para enviar órdenes en la API")
+                return None
+            if isinstance(result, tuple):
+                check, oid = result
+                if not check:
                     logger.error(
-                        "No se encontró un método para enviar órdenes en la API")
+                        "Error enviando orden binaria a IQ Option (check=False)")
                     return None
-                if isinstance(result, tuple):
-                    check, oid = result
-                    if not check:
-                        logger.error(
-                            "Error enviando orden binaria a IQ Option (check=False)")
-                        return None
-                    order_id = oid
-                elif isinstance(result, dict):
-                    check = result.get('check', result.get('success', False))
-                    order_id = result.get('id')
-                    if not check:
-                        logger.error(
-                            "Error enviando orden binaria a IQ Option")
-                        return None
-                else:
+                order_id = oid
+            elif isinstance(result, dict):
+                check = result.get('check', result.get('success', False))
+                order_id = result.get('id')
+                if not check:
                     logger.error(
-                        f"Resultado de buy() inesperado: {
-                            type(result)} - {result}")
+                        "Error enviando orden binaria a IQ Option")
                     return None
+            else:
+                logger.error(
+                    f"Resultado de buy() inesperado: {
+                        type(result)} - {result}")
+                return None
             if order_id is None:
                 logger.error("La orden no devolvió un ID válido")
                 return None
@@ -14915,7 +15009,10 @@ class TradingManager:
         self.monitor_thread = None
         
         # ✅ FIX: Circuit Breaker
-        self.circuit_breaker = CircuitBreaker()
+        self.circuit_breaker = CircuitBreaker(
+            max_perdidas_consecutivas=int(getattr(self.config, "CIRCUIT_BREAKER_MAX_PERDIDAS", 3) or 3),
+            max_drawdown_pct=float(getattr(self.config, "CIRCUIT_BREAKER_MAX_DRAWDOWN_PCT", 0.15) or 0.15)
+        )
         
         # Referencias a componentes clave para integración
         self.ensemble_predictor = EnsemblePredictor(
@@ -14929,6 +15026,10 @@ class TradingManager:
         except Exception:
             pass
         self._cargar_operaciones_cerradas()
+        try:
+            self.iniciar_monitoreo()
+        except Exception:
+            pass
         logger.info("TradingManager inicializado")
 
     def _parse_dt(self, v):
@@ -20195,9 +20296,9 @@ class APIWorker(QObject):
         self.bridge = bridge
         self._candles_request_queue = Queue()
 
-    def connect_iq(self, email: str, password: str):
+    def connect_iq(self, email: str, password: str, tipo_cuenta: str = "PRACTICE"):
         try:
-            success = self.bridge.connect()
+            success = self.bridge.connect(email=email, password=password, tipo_cuenta=tipo_cuenta)
             msg = "Conexión exitosa" if success else "Fallo al conectar"
             self.finished.emit(success, msg)
         except Exception as e:
@@ -20340,6 +20441,11 @@ if GUI_AVAILABLE:
                         'GUI_LIVE_UPDATE_INTERVAL_MS',
                         4000) or 4000)
                 self.timer_vivo.start(max(500, intervalo))
+
+            if not hasattr(self, 'timer_refresh_pares') or self.timer_refresh_pares is None:
+                self.timer_refresh_pares = QTimer()
+                self.timer_refresh_pares.timeout.connect(self._refresh_pares_periodico)
+                self.timer_refresh_pares.start(5 * 60 * 1000)
             # ==========================================
             # MÉTODO DE ESCANEO (Pon esto dentro de tu clase)
             # ==========================================
@@ -20763,40 +20869,16 @@ if GUI_AVAILABLE:
                     if resultado['accion'] in ['CALL', 'PUT']:
                         direction = resultado['accion'].lower()
                         id_compra = None
-                        try:
-                            usar_emulacion = bool(
-                                getattr(
-                                    self.config,
-                                    "HABILITAR_EMULACION_HUMANA",
-                                    True)) and bool(
-                                getattr(
-                                    self.config,
-                                    "USAR_EJECUTOR_HUMANO",
-                                    True))
-                        except Exception:
-                            usar_emulacion = True
-                        if usar_emulacion:
-                            try:
-                                if not hasattr(
-                                        self, "human_executor") or self.human_executor is None:
-                                    self.human_executor = HumanMouseExecutor()
-                            except Exception:
-                                self.human_executor = HumanMouseExecutor()
-                            id_compra = self.human_executor.ejecutar_orden_humana(
-                                self.api, self.config.ACTIVO, resultado['accion'], float(
-                                    self.config.MONTO_OPERACION), int(
-                                    self.config.TIEMPO_EXPIRACION or 5))
-                        else:
-                            res = self.api.buy(
-                                float(
-                                    self.config.MONTO_OPERACION), self.config.ACTIVO, direction, int(
-                                    self.config.TIEMPO_EXPIRACION or 5))
-                            if isinstance(res, tuple) and len(res) >= 2:
-                                ok, oid = res[0], res[1]
-                                if ok and oid:
-                                    id_compra = oid
-                            elif res:
-                                id_compra = res
+                        res = self.api.buy(
+                            float(
+                                self.config.MONTO_OPERACION), self.config.ACTIVO, direction, int(
+                                self.config.TIEMPO_EXPIRACION or 5))
+                        if isinstance(res, tuple) and len(res) >= 2:
+                            ok, oid = res[0], res[1]
+                            if ok and oid:
+                                id_compra = oid
+                        elif res:
+                            id_compra = res
 
                         if id_compra:
                             self.log_message(
@@ -21408,22 +21490,29 @@ if GUI_AVAILABLE:
             return False
 
         def _cargar_credenciales_completas(self) -> Tuple[str, str, str]:
-            """Carga las credenciales completas incluyendo el tipo de cuenta"""
+            """Carga credenciales IQ sin usar valores hardcodeados."""
             try:
-                if os.path.exists(self.config.RUTA_CREDENCIALES_IQ):
-                    with open(self.config.RUTA_CREDENCIALES_IQ, 'r') as f:
-                        creds = json.load(f)
+                email_env = os.environ.get('IQ_OPTION_EMAIL', '').strip()
+                pass_env = os.environ.get('IQ_OPTION_PASSWORD', '').strip()
+                if email_env and pass_env:
                     return (
-                        creds.get('email', 'aguirreadolfo_125@hotmail.com'),
-                        creds.get('password', 'Carmen29@'),
-                        creds.get('tipo_cuenta', 'PRACTICE')
+                        email_env,
+                        pass_env,
+                        str(getattr(self.config, 'TIPO_CUENTA', 'PRACTICE') or 'PRACTICE').upper()
+                    )
+
+                if os.path.exists(self.config.RUTA_CREDENCIALES_IQ):
+                    with open(self.config.RUTA_CREDENCIALES_IQ, 'r', encoding='utf-8') as f:
+                        creds = json.load(f) or {}
+                    return (
+                        str(creds.get('email', '') or '').strip(),
+                        str(creds.get('password', '') or '').strip(),
+                        str(creds.get('tipo_cuenta', getattr(self.config, 'TIPO_CUENTA', 'PRACTICE')) or 'PRACTICE').upper()
                     )
             except Exception as e:
                 logger.error(f"Error cargando credenciales: {e}")
 
-            # Credenciales por defecto si no se encuentran en el archivo
-            logger.info("Usando credenciales por defecto")
-            return "aguirreadolfo_125@hotmail.com", "CarmenA29@/", "PRACTICE"
+            return "", "", str(getattr(self.config, 'TIPO_CUENTA', 'PRACTICE') or 'PRACTICE').upper()
 
         def toggle_escaneo(self):
             """Activa o desactiva el escaneo del mercado"""
@@ -22670,6 +22759,20 @@ if GUI_AVAILABLE:
                 self.log_mensaje("Conexión en progreso...")
                 return
 
+            email, password, tipo_cuenta = self._cargar_credenciales_completas()
+            if not email or not password:
+                self.log_mensaje("❌ Credenciales IQ Option no configuradas")
+                QMessageBox.warning(
+                    self,
+                    "Credenciales requeridas",
+                    "Configura Email y Password en la pestaña IQ Option o en variables de entorno IQ_OPTION_EMAIL/IQ_OPTION_PASSWORD."
+                )
+                return
+
+            tipo_cuenta = "REAL" if str(tipo_cuenta).upper() == "REAL" else "PRACTICE"
+            self.config.TIPO_CUENTA = tipo_cuenta
+            self.iq_bridge.tipo_cuenta_actual = tipo_cuenta
+
             # Desactivar botón durante operación
             self.btn_conectar.setEnabled(False)
             self.btn_conectar.setText("Conectando...")
@@ -22683,7 +22786,9 @@ if GUI_AVAILABLE:
             self._api_worker.finished.connect(self._on_connection_finished)
             self._api_worker.error.connect(self._on_api_error)
             self._api_worker_thread.started.connect(lambda: self._api_worker.connect_iq(
-                *self._cargar_credenciales_completas()[:2]
+                email,
+                password,
+                tipo_cuenta
             ))
             self._api_worker.finished.connect(self._api_worker_thread.quit)
             self._api_worker.error.connect(self._api_worker_thread.quit)
@@ -22699,6 +22804,11 @@ if GUI_AVAILABLE:
                 self.actualizar_estado_conexion(True)
                 self.actualizar_info_cuenta()
                 self.log_mensaje("✅ Conectado a IQ Option")
+                if hasattr(self, 'trading_manager') and self.trading_manager:
+                    try:
+                        self.trading_manager.iniciar_monitoreo()
+                    except Exception:
+                        pass
                 # Iniciar carga de pares en worker
                 QTimer.singleShot(500, self.refrescar_pares_disponibles)
                 QTimer.singleShot(800, self._iniciar_cold_start_ia)
@@ -22710,6 +22820,14 @@ if GUI_AVAILABLE:
             self.log_mensaje(f"⚠️ Error API: {error_msg}")
             self.btn_conectar.setEnabled(True)
             self.btn_conectar.setText("🔌 Conectar")
+
+        def _refresh_pares_periodico(self):
+            """Refresca pares disponibles cada 5 minutos para robustez 24/7."""
+            try:
+                if getattr(self.iq_bridge, "connected", False):
+                    self.refrescar_pares_disponibles()
+            except Exception:
+                return
 
         def _start_live_updates(self):
             try:
@@ -22802,6 +22920,45 @@ if GUI_AVAILABLE:
                             "REAL") or "REAL").upper()
                     if tipo != "REAL":
                         continue
+                    if not validar_alineacion_estricta_operacion(datos, accion):
+                        continue
+                    if bool(getattr(self.config, "EXIGIR_FILTROS_CALIDAD_SENAL", True)):
+                        indicadores = datos.get("indicadores", {}) or {}
+
+                        volatilidad = datos.get("volatilidad")
+                        if volatilidad is None:
+                            volatilidad = indicadores.get("volatilidad")
+                        atr = datos.get("ATR")
+                        if atr is None:
+                            atr = indicadores.get("ATR")
+                        try:
+                            vol_val = float(volatilidad) if volatilidad is not None else None
+                        except Exception:
+                            vol_val = None
+                        try:
+                            atr_val = float(atr) if atr is not None else None
+                        except Exception:
+                            atr_val = None
+
+                        # Evitar mercado demasiado quieto (ATR bajo) o extremadamente errático
+                        if atr_val is not None and atr_val < 0.0002:
+                            continue
+                        if vol_val is not None and (vol_val <= 0.03 or vol_val >= 4.5):
+                            continue
+
+                        sesion = str(datos.get("sesion") or indicadores.get("sesion") or "").upper()
+                        sesiones_permitidas = {"LONDRES", "NY", "NEW_YORK", "LONDRES_NY"}
+                        if sesion not in sesiones_permitidas:
+                            continue
+
+                        hay_noticias = bool(
+                            datos.get("hay_noticias")
+                            or indicadores.get("hay_noticias")
+                            or datos.get("news_high_impact")
+                            or indicadores.get("news_high_impact")
+                        )
+                        if hay_noticias:
+                            continue
                     last_par = float(
                         self._auto_exec_last_par.get(
                             par, 0.0) or 0.0)
@@ -23457,7 +23614,7 @@ def run_headless_mode():
         logger.info("Iniciando loop de trading (Ctrl+C para detener)")
 
         ultima_actualizacion_pares = time.time()
-        INTERVALO_REFRESH_PARES = 15 * 60  # 15 minutos
+        INTERVALO_REFRESH_PARES = 5 * 60  # 5 minutos
 
         while True:
             try:
@@ -23482,6 +23639,21 @@ def run_headless_mode():
                         config.PARES_TRADING = nuevos_pares
                         logger.info(f"Pares actualizados: {len(nuevos_pares)}")
                     ultima_actualizacion_pares = time.time()
+
+                # -----------------------------
+                # Sincronización de análisis (2s antes del cierre de vela)
+                # -----------------------------
+                segundos_antes = int(getattr(config, 'ANALISIS_SEGUNDOS_ANTES_CIERRE_VELA', 2) or 2)
+                segundos_antes = max(1, min(10, segundos_antes))
+                ahora_sync = time.time()
+                segundo_actual = float(ahora_sync % 60)
+                objetivo = float(60 - segundos_antes)
+                if segundo_actual < objetivo:
+                    espera = objetivo - segundo_actual
+                else:
+                    espera = (60.0 - segundo_actual) + objetivo
+                if espera > 0.05:
+                    time.sleep(espera)
 
                 # -----------------------------
                 # Verificar límite de trades por sesión
