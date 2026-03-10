@@ -2791,7 +2791,7 @@ class ConfiguracionTrading:
         # ==========================================
         # CUENTA
         # ==========================================
-        self.TIPO_CUENTA = "PRACTICE"
+        self.TIPO_CUENTA = "REAL"
         self.RUTA_CREDENCIALES_IQ = "iq_creds.json"
 
         # ==========================================
@@ -2854,7 +2854,7 @@ class ConfiguracionTrading:
         # TRADING (BASE)
         # ==========================================
         self.AUTO_TRADING_HABILITADO = True
-        self.MODO_PAPER_TRADING = True
+        self.MODO_PAPER_TRADING = False
         self.MONTO_OPERACION = 1.0
         self.PORCENTAJE_INVERSION = 0.1
         self.MAX_OPERACIONES_SIMULTANEAS = 1
@@ -2868,7 +2868,7 @@ class ConfiguracionTrading:
         # ==========================================
         # 🛡️ PASO 3.4 – CONTROL DE PRODUCCIÓN
         # ==========================================
-        self.MODO_PRODUCCION = False          # 🔒 OFF por defecto
+        self.MODO_PRODUCCION = True          # ✅ ON por defecto (modo productivo)
         self.AUTO_TRADING = True             # Control maestro
         self.AUTO_TRADING_HABILITADO = True  # Flag usado por ejecución binaria
         self.USAR_EJECUTOR_HUMANO = False      # Ejecución API directa (sin emulación GUI)
