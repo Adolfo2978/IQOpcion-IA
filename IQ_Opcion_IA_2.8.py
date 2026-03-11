@@ -2879,7 +2879,7 @@ class ConfiguracionTrading:
         # ==========================================
         # 🛡️ PASO 3.4 – CONTROL DE PRODUCCIÓN
         # ==========================================
-        self.MODO_PRODUCCION = False          # 🔒 OFF por defecto
+        self.MODO_PRODUCCION = True           # ✅ ON por defecto para permitir auto-ejecución
         self.AUTO_TRADING = True             # Control maestro
         self.AUTO_TRADING_HABILITADO = True  # Flag usado por ejecución binaria
         self.USAR_EJECUTOR_HUMANO = True      # Anti-baneo
@@ -22649,31 +22649,45 @@ if GUI_AVAILABLE:
                 self._live_worker = None
                 self._live_worker_thread = None
 
-        def _intentar_auto_ejecucion(self, resultados: dict):
+        def _auto_exec_block_reason(self, resultados: dict):
             try:
                 if not isinstance(resultados, dict) or not resultados:
-                    return
+                    return "sin_resultados"
                 if getattr(self.config, "MODO_PAPER_TRADING", True):
-                    return
+                    return "paper_trading_activo"
                 if not getattr(self.config, "AUTO_EJECUTAR_BROKER", False):
-                    return
+                    return "auto_ejecutar_broker_off"
                 if not getattr(self.config, "AUTO_TRADING_HABILITADO", False):
-                    return
+                    return "auto_trading_habilitado_off"
                 if getattr(self.config, "PAUSADO_POR_OBJETIVO", False):
-                    return
+                    return "pausado_por_objetivo"
                 if getattr(self.config, "KILL_SWITCH", False):
-                    return
+                    return "kill_switch_activo"
                 if not getattr(self.config, "MODO_PRODUCCION", False):
-                    return
+                    return "modo_produccion_off"
                 if getattr(self.config, "DRY_RUN", False):
-                    return
+                    return "dry_run_activo"
                 if not getattr(self.iq_bridge, "connected", False):
-                    return
+                    return "iq_no_conectado"
                 if getattr(self.iq_bridge, "operacion_activa", False):
-                    return
+                    return "operacion_activa"
                 if getattr(self.seguimiento_senales, "senales_activas", None):
                     if self.seguimiento_senales.senales_activas:
-                        return
+                        return "senal_activa_en_seguimiento"
+                return None
+            except Exception as e:
+                return f"error_validacion:{e}"
+
+        def _intentar_auto_ejecucion(self, resultados: dict):
+            try:
+                reason = self._auto_exec_block_reason(resultados)
+                if reason:
+                    now = time.time()
+                    last = float(getattr(self, "_last_auto_exec_reason_ts", 0.0) or 0.0)
+                    if now - last > 30.0:
+                        self._last_auto_exec_reason_ts = now
+                        self.log_mensaje(f"⛔ Auto-ejecución bloqueada: {reason}")
+                    return
 
                 ahora = time.time()
                 cooldown_global = float(
@@ -22724,6 +22738,11 @@ if GUI_AVAILABLE:
                         mejor = (par, datos, conf)
 
                 if mejor is None:
+                    now = time.time()
+                    last = float(getattr(self, "_last_auto_exec_reason_ts", 0.0) or 0.0)
+                    if now - last > 30.0:
+                        self._last_auto_exec_reason_ts = now
+                        self.log_mensaje("⛔ Auto-ejecución: no hay señal elegible (confianza/tipo/cooldown)")
                     return
 
                 par, datos, conf = mejor

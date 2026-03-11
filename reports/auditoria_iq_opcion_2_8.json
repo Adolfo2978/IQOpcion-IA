@@ -1,6 +1,6 @@
 {
   "file": "IQ_Opcion_IA_2.8.py",
-  "total_lines": 25072,
+  "total_lines": 25091,
   "top_level_defs": 67,
   "imports_total": 42,
   "duplicate_imports": [
@@ -164,42 +164,42 @@
     },
     {
       "type": "silent_exception",
-      "line": 23214,
+      "line": 23233,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23861,
+      "line": 23880,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 24558,
+      "line": 24577,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24567,
+      "line": 24586,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24583,
+      "line": 24602,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24612,
+      "line": 24631,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24869,
+      "line": 24888,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24911,
+      "line": 24930,
       "exc": "Exception"
     },
     {
@@ -314,22 +314,22 @@
     },
     {
       "type": "silent_exception",
-      "line": 23783,
+      "line": 23802,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 23874,
+      "line": 23893,
       "exc": "BaseException"
     },
     {
       "type": "silent_exception",
-      "line": 24860,
+      "line": 24879,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24918,
+      "line": 24937,
       "exc": "Exception"
     },
     {
@@ -509,17 +509,17 @@
     },
     {
       "type": "silent_exception",
-      "line": 23416,
+      "line": 23435,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23762,
+      "line": 23781,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24817,
+      "line": 24836,
       "exc": "Exception"
     },
     {
@@ -534,17 +534,17 @@
     },
     {
       "type": "silent_exception",
-      "line": 23177,
+      "line": 23196,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23367,
+      "line": 23386,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 23540,
+      "line": 23559,
       "exc": "Exception"
     },
     {
@@ -559,7 +559,7 @@
     },
     {
       "type": "silent_exception",
-      "line": 24770,
+      "line": 24789,
       "exc": "Exception"
     },
     {
@@ -569,12 +569,12 @@
     },
     {
       "type": "silent_exception",
-      "line": 24789,
+      "line": 24808,
       "exc": "Exception"
     },
     {
       "type": "silent_exception",
-      "line": 24810,
+      "line": 24829,
       "exc": "Exception"
     }
   ],

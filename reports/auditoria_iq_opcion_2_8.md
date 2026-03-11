@@ -1,7 +1,7 @@
 # Auditoría técnica — IQ_Opcion_IA_2.8.py
 
 ## Resumen ejecutivo
-- Líneas totales: **25072**
+- Líneas totales: **25091**
 - Definiciones top-level (funciones/clases): **67**
 - Imports detectados: **42**
 - Imports duplicados: **6** → collections.deque, datetime.datetime, typing.Dict, typing.List, typing.Optional, typing.Tuple
@@ -37,14 +37,14 @@
 - `silent_exception` en línea **18751**, exc=Exception
 - `silent_exception` en línea **19577**, exc=Exception
 - `silent_exception` en línea **19583**, exc=Exception
-- `silent_exception` en línea **23214**, exc=Exception
-- `silent_exception` en línea **23861**, exc=BaseException
-- `silent_exception` en línea **24558**, exc=Exception
-- `silent_exception` en línea **24567**, exc=Exception
-- `silent_exception` en línea **24583**, exc=Exception
-- `silent_exception` en línea **24612**, exc=Exception
-- `silent_exception` en línea **24869**, exc=Exception
-- `silent_exception` en línea **24911**, exc=Exception
+- `silent_exception` en línea **23233**, exc=Exception
+- `silent_exception` en línea **23880**, exc=BaseException
+- `silent_exception` en línea **24577**, exc=Exception
+- `silent_exception` en línea **24586**, exc=Exception
+- `silent_exception` en línea **24602**, exc=Exception
+- `silent_exception` en línea **24631**, exc=Exception
+- `silent_exception` en línea **24888**, exc=Exception
+- `silent_exception` en línea **24930**, exc=Exception
 - `silent_exception` en línea **3438**, exc=Exception
 - `silent_exception` en línea **3451**, exc=Exception
 - `silent_exception` en línea **3461**, exc=Exception
@@ -67,10 +67,10 @@
 - `silent_exception` en línea **20956**, exc=Exception
 - `silent_exception` en línea **21023**, exc=Exception
 - `silent_exception` en línea **21053**, exc=Exception
-- `silent_exception` en línea **23783**, exc=BaseException
-- `silent_exception` en línea **23874**, exc=BaseException
-- `silent_exception` en línea **24860**, exc=Exception
-- `silent_exception` en línea **24918**, exc=Exception
+- `silent_exception` en línea **23802**, exc=BaseException
+- `silent_exception` en línea **23893**, exc=BaseException
+- `silent_exception` en línea **24879**, exc=Exception
+- `silent_exception` en línea **24937**, exc=Exception
 - `silent_exception` en línea **2359**, exc=Exception
 - `silent_exception` en línea **2406**, exc=Exception
 - `silent_exception` en línea **3057**, exc=Exception
