@@ -7,9 +7,24 @@
 #   Linux/Replit:    python IQ_Opcion_IA_2.0.py  (auto-detecta sin display)
 #   Forzar consola:  HEADLESS=true python IQ_Opcion_IA_2.0.py
 import re
-from tkinter import ttk, messagebox
-import tkinter as tk
-from typing import Optional, List, Tuple
+import platform as _platform_early
+import os as _os_early
+import sys as _sys_early
+import argparse as _argparse_early
+_parser_early = _argparse_early.ArgumentParser(add_help=False)
+_parser_early.add_argument('--console', '-c', action='store_true')
+_parser_early.add_argument('--headless', action='store_true')
+_args_early, _ = _parser_early.parse_known_args()
+_IS_REPLIT_EARLY = _os_early.environ.get('REPL_ID') is not None or _os_early.environ.get('REPLIT') is not None
+_HEADLESS_EARLY = _args_early.console or _args_early.headless or _os_early.environ.get('HEADLESS', '').lower() == 'true' or _IS_REPLIT_EARLY or (_platform_early.system() != 'Windows' and _os_early.environ.get('DISPLAY') is None)
+if not _HEADLESS_EARLY:
+    from tkinter import ttk, messagebox
+    import tkinter as tk
+else:
+    tk = None
+    ttk = None
+    messagebox = None
+from typing import Optional, List, Tuple, cast
 from sklearn.linear_model import SGDClassifier
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
@@ -35,6 +50,7 @@ import platform
 import sys
 import os
 import argparse
+import traceback
 from queue import Queue, Empty
 from collections import deque
 # Parsear argumentos de línea de comandos PRIMERO
@@ -70,9 +86,8 @@ if HEADLESS_MODE:
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 # Configuración de logging - Archivo + Consola en modo headless
-_log_handlers = [
-    logging.FileHandler('IQ_Option 2.8.4_pro.log', encoding='utf-8'),
-
+_log_handlers: List[logging.Handler] = [
+    logging.FileHandler('IQ_Option_2.8.9_pro.log', encoding='utf-8'),
 ]
 if HEADLESS_MODE:
     # En modo consola, también mostrar logs en terminal
@@ -107,6 +122,55 @@ def asegurar_directorio_datos() -> None:
     #     buffer_nuevos = obtener_ultimos_trades(500)
     #     modelo.retrain(buffer_nuevos)
     #     ultima_retrain = tiempo_actual
+
+
+def calcular_umbral_combinado(
+        umbral_general: float,
+        umbral_ia: float,
+        umbral_tecnico: float) -> float:
+    """
+    Evita bloquear operaciones con un umbral combinado imposible.
+
+    Si IA y técnico ya aprobaron sus propios mínimos, la combinación ponderada
+    no debe exigir más que el umbral individual más estricto.
+    """
+    try:
+        umbral_general = float(umbral_general or 0.0)
+    except Exception:
+        umbral_general = 0.0
+    try:
+        umbral_ia = float(umbral_ia or 0.0)
+    except Exception:
+        umbral_ia = 0.0
+    try:
+        umbral_tecnico = float(umbral_tecnico or 0.0)
+    except Exception:
+        umbral_tecnico = 0.0
+
+    umbral_base = max(umbral_ia, umbral_tecnico)
+    if umbral_general <= 0:
+        return umbral_base
+    return min(umbral_general, umbral_base)
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    """Convierte a float sin exponer None/Unknown al tipado estático."""
+    try:
+        if value is None:
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+def safe_int(value: Any, default: int = 0) -> int:
+    """Convierte a int sin exponer None/Unknown al tipado estÃ¡tico."""
+    try:
+        if value is None:
+            return int(default)
+        return int(value)
+    except Exception:
+        return int(default)
+
 
 def migrar_archivos_datos() -> None:
     try:
@@ -168,10 +232,10 @@ class LogHandlerGUI(logging.Handler):
 
 
 # Mostrar modo de ejecución
+# Evita errores de sintaxis por strings multilínea
 if HEADLESS_MODE:
     logger.info(
-        f"=== MODO CONSOLA (Headless) === Plataforma: {
-            platform.system()}, Replit: {IS_REPLIT}")
+        f"=== MODO CONSOLA (Headless) === Plataforma: {platform.system()}, Replit: {IS_REPLIT}")
 # Handler personalizado para enviar logs a la GUI
 
 
@@ -262,7 +326,7 @@ try:
         matplotlib.use('Qt5Agg')
     else:
         matplotlib.use('Agg')
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
@@ -317,7 +381,7 @@ except ImportError as e:
     logger.warning(f"iqoptionapi.stable_api no disponible: {e}")
 # SEGUNDO: Siempre intentar cargar iqoption-async como fallback disponible
 try:
-    from iqoption_async.client import IQOptionClient
+    from iqoption_async.client import IQOptionClient  # pyright: ignore[reportMissingImports]
     IQOPTION_ASYNC_AVAILABLE = True
     if not IQOPTION_AVAILABLE:
         IQOPTION_AVAILABLE = True
@@ -328,8 +392,7 @@ if not IQOPTION_AVAILABLE:
     logger.error("Ninguna API de IQ Option disponible")
     logger.error("Instalar con: pip install iqoptionapi")
 try:
-    import talib
-    from talib.abstract import *
+    import talib  # pyright: ignore[reportMissingImports]
     TALIB_AVAILABLE = True
     logger.info("TA-Lib disponible")
 except ImportError as e:
@@ -337,7 +400,7 @@ except ImportError as e:
         f"TA-Lib no disponible, usando implementación propia. Error: {e}")
     TALIB_AVAILABLE = False
 try:
-    from plyer import notification
+    from plyer import notification  # pyright: ignore[reportMissingImports]
     NOTIFICATIONS_AVAILABLE = True
     logger.info("Sistema de notificaciones disponible")
 except ImportError:
@@ -347,6 +410,61 @@ except ImportError:
 # HELPER PARA EJECUTAR COROUTINES SINCRONAMENTE
 # ==================================================
 DEFAULT_TIMEOUT_SECONDS = 60
+
+def seed_everything(seed: int = 42) -> None:
+    """Establece seeds para reproducibilidad en RNGs comunes."""
+    import random
+    random.seed(seed)
+    try:
+        import numpy as _np
+        _np.random.seed(seed)
+    except Exception:
+        pass
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if hasattr(torch, 'cuda') and torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except Exception:
+        pass
+
+# Garantizar reproducibilidad por defecto
+seed_everything(42)
+
+def seed_everything(seed: int = 42) -> None:
+    """Establece seeds para reproducibilidad en RNGs comunes."""
+    import random
+    random.seed(seed)
+    try:
+        import numpy as _np
+        _np.random.seed(seed)
+    except Exception:
+        pass
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if hasattr(torch, 'cuda') and torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except Exception:
+        pass
+
+# Garantizar reproducibilidad por defecto
+seed_everything(42)
+
+def seed_everything(seed: int = 42) -> None:
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except Exception:
+        pass
+
+# Ensure determinism for reproducibility
+seed_everything(42)
 
 
 def _run_async_safe(coro):
@@ -398,12 +516,31 @@ class FeatureExtractor:
             'volume_avg_diff'       # 14
         ]
 
+    def _validate_no_lookahead(self, df: pd.DataFrame) -> bool:
+        """Guard against lookahead leakage: if the last timestamp is in the future, reject."""
+        try:
+            if df is None or len(df) == 0:
+                return True
+            idx = df.index
+            if isinstance(idx, pd.DatetimeIndex) and len(idx) > 0:
+                last_ts = idx[-1]
+                if isinstance(last_ts, pd.Timestamp) and last_ts > pd.Timestamp.now():
+                    return False
+        except Exception:
+            return True
+        return True
+
     def calculate_features(self, df: pd.DataFrame) -> np.ndarray:
         # --- VALIDACIÓN FUERTE ---
+        logger.debug(f"[FEATURE] Inicio cálculo de features: df_len={len(df) if df is not None else 0}")
         if df is None or len(df) < 60:
             return np.zeros((1, 15), dtype=np.float32)
 
         df = df.copy()
+        # Lookahead leakage check
+        if not self._validate_no_lookahead(df):
+            # Return zeros para evitar usar datos futuros
+            return np.zeros((1, 15), dtype=np.float32)
 
         # Asegurar tipos
         for col in ['open', 'high', 'low', 'close', 'volume']:
@@ -489,6 +626,7 @@ class FeatureExtractor:
                 f"FeatureExtractor ERROR: shape inválido {
                     features.shape}")
 
+        logger.debug(f"[FEATURE] Features calculadas: shape={features.shape}")
         return features
 
 # ==================================================
@@ -566,6 +704,16 @@ class AIEngineContinuous:
         Retorna confianza (0–100) y metadata.
         🚫 La IA NUNCA habilita trading si confianza < UMBRAL (default 85%)
         """
+        # Validación de entrada para seguridad
+        if df is None or not isinstance(df, pd.DataFrame):
+            self.logger.error("[IA] DF inválido: se esperaba un DataFrame de pandas")
+            self._last_direction = None
+            return 0.0, {"estado": "DF_INVALIDO"}
+        # Validación de entrada
+        if df is None or not isinstance(df, pd.DataFrame):
+            self.logger.error("[IA] DF inválido: se esperaba un DataFrame de pandas")
+            self._last_direction = None
+            return 0.0, {"estado": "DF_INVALIDO"}
         try:
             # ==============================
             # VALIDACIÓN DF
@@ -685,6 +833,17 @@ class AIEngineContinuous:
         Entrenamiento inicial con datos históricos (COLD START).
         Simula operaciones binarias reales (CALL / PUT).
         """
+        # Validaciones de entrada para evitar errores en producción
+        if df is None or not isinstance(df, pd.DataFrame):
+            self.logger.error("[IA] Cold Start abortado: DF inválido o no proporcionado")
+            return
+        required = {"open", "high", "low", "close"}
+        if not required.issubset(df.columns):
+            self.logger.error(
+                f"[IA] Cold Start abortado: DF OHLC inválido. Recibidas={set(df.columns)}"
+            )
+            return
+
         try:
             self.logger.info(
                 "🧊 Iniciando entrenamiento en frío (histórico)...")
@@ -738,6 +897,7 @@ class AIEngineContinuous:
         # ==================================================
             features = []
             targets = []
+            synthetic_returns = []
 
             ventana_size = 60
             expiracion_velas = 1
@@ -755,6 +915,10 @@ class AIEngineContinuous:
                 precio_cierre = float(df["close"].iloc[i + expiracion_velas])
                 delta = precio_cierre - precio_entrada
 
+                # Aplicar costo de transacción simulado (backtest realista)
+                cost_per_trade = float(getattr(self.config, "BACKTEST_COST_PER_TRADE", 0.0005))
+                net_delta = delta - (precio_entrada + precio_cierre) * cost_per_trade
+
                 # Ignorar movimientos insignificantes
                 if abs(delta) < ruido_minimo:
                     continue
@@ -764,16 +928,26 @@ class AIEngineContinuous:
                 # ==================================================
                 if i % 2 == 0:
                     # CALL
-                    target = 1 if delta > 0 else 0
+                    target = 1 if net_delta > 0 else 0
                 else:
                     # PUT
-                    target = 1 if delta < 0 else 0
+                    target = 1 if net_delta < 0 else 0
 
                 features.append(X[0])
                 targets.append(target)
+                # Backtest sintético del Cold Start: coste y payout por trade
+                try:
+                    payout_ratio = float(getattr(self.config, "BACKTEST_PAYOUT_RATIO", 1.8))
+                    cost_per_trade = float(getattr(self.config, "BACKTEST_COST_PER_TRADE", 0.0005))
+                    win = (delta > 0 and target == 1) or (delta < 0 and target == 0)
+                    net_pnl = (payout_ratio - 1.0) if win else -1.0
+                    net_pnl -= cost_per_trade
+                    synthetic_returns.append(net_pnl)
+                except Exception:
+                    pass
 
             # ==================================================
-            # VALIDACIÓN FINAL DE SAMPLES
+            # Validación final de samples
             # ==================================================
             if len(features) < self.batch_size:
                 self.logger.warning(
@@ -821,6 +995,31 @@ class AIEngineContinuous:
             self.save_scaler()
 
             winrate = round(float(y_all.mean()) * 100, 2)
+            # Reporte de backtest sintético de arranque
+            try:
+                metrics_adv = compute_advanced_metrics(synthetic_returns)
+                dist = metrics_adv.get("distribution", {})
+                self.logger.info(
+                    f"🧪 Cold Start Synthetic Backtest | Trades={len(synthetic_returns)} | "
+                    f"WinRate={metrics_adv.get('win_rate',0)*100:.2f}% | EV/trade={metrics_adv.get('ev_per_trade',0):.6f} | "
+                    f"Sharpe={metrics_adv.get('sharpe',0):.4f} | Sortino={metrics_adv.get('sortino',0):.4f} | Calmar={metrics_adv.get('calmar',0):.4f} | "
+                    f"MaxDD={metrics_adv.get('max_drawdown',0):.6f} | Dist_p25={dist.get('p25',0):.6f} | p50={dist.get('p50',0):.6f}"
+                )
+                # Logs de distribuciones opcionales
+            except Exception:
+                pass
+
+            # Registros por ventana de rendimiento (opcional)
+            try:
+                windows = 50
+                windows_metrics = compute_return_distributions(synthetic_returns, windows)
+                for idx, w in enumerate(windows_metrics):
+                    if w:
+                        self.logger.info(
+                            f"🧭 Ventana {idx*windows}-{(idx+1)*windows} trades: {w['n_trades']} | WinRate={w['win_rate']*100:.2f}% | EV/trade={w['ev_per_trade']:.6f}"
+                        )
+            except Exception:
+                pass
 
             self.logger.info(
                 "❄️ Cold Start COMPLETADO | "
@@ -850,7 +1049,7 @@ class AIEngineContinuous:
                 self._last_direction}")
 
     def learn_from_result(
-            self, is_win: bool, direction: str = None, account_type: str = "PRACTICE", trade_id: int = None):
+            self, is_win: bool, direction: Optional[str] = None, account_type: str = "PRACTICE", trade_id: Optional[int] = None):
         """
         Aprende SOLO cuando hay resultado real (WIN / LOSS).
         Debe llamarse exactamente UNA VEZ al cerrar la operación.
@@ -1006,11 +1205,8 @@ class AIEngineContinuous:
         with self._lock:
             try:
                 os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
-                if hasattr(self.model, "save"):
-                    self.model.save(self.model_path)
-                else:
-                    import joblib
-                    joblib.dump(self.model, self.model_path)
+                import joblib
+                joblib.dump(self.model, self.model_path)
 
                 self.logger.info(f"💾 Modelo IA guardado en {self.model_path}")
             except Exception as e:
@@ -1023,6 +1219,27 @@ class AIEngineContinuous:
         with self._lock:
             try:
                 os.makedirs(os.path.dirname(self.scaler_path), exist_ok=True)
+                try:
+                    import joblib
+                    joblib.dump(self.scaler, self.scaler_path)
+                except Exception:
+                    try:
+                        import pickle
+                        with open(self.scaler_path, 'wb') as f:
+                            pickle.dump(self.scaler, f)
+                    except Exception as e2:
+                        raise e2
+                self.logger.info(f"💾 Scaler guardado en {self.scaler_path}")
+            except Exception as e:
+                self.logger.error(
+                    f"❌ Error guardando scaler IA: {e}",
+                    exc_info=True)
+
+def save_scaler(self):
+        """Guarda el scaler del modelo."""
+        with self._lock:
+            try:
+                os.makedirs(os.path.dirname(self.scaler_path), exist_ok=True)
                 import joblib
                 joblib.dump(self.scaler, self.scaler_path)
                 self.logger.info(f"💾 Scaler guardado en {self.scaler_path}")
@@ -1030,6 +1247,130 @@ class AIEngineContinuous:
                 self.logger.error(
                     f"❌ Error guardando scaler IA: {e}",
                     exc_info=True)
+
+# ==================================================
+# Métricas de rendimiento utilitarias (externas)
+# ==================================================
+def compute_performance_metrics(returns: List[float]) -> dict:
+    """Calcula métricas básicas de rendimiento dadas una lista de retornos."""
+    if returns is None or len(returns) == 0:
+        return {
+            "total": 0.0,
+            "n_trades": 0,
+            "win_rate": 0.0,
+            "ev_per_trade": 0.0,
+            "sharpe": 0.0,
+            "max_drawdown": 0.0,
+        }
+    arr = np.array(returns, dtype=float)
+    total = float(np.sum(arr))
+    n = len(arr)
+    wins = float((arr > 0).sum())
+    win_rate = wins / n
+    ev_per_trade = total / n
+    mean = float(np.mean(arr))
+    std = float(np.std(arr)) if np.std(arr) != 0 else 1e-9
+    sharpe = mean / std
+    # Drawdown simple (pico): cálculo básico del drawdown máximo en la serie
+    cum = np.cumsum(arr)
+    peak = -np.inf
+    max_dd = 0.0
+    current = 0.0
+    for v in cum:
+        current = v
+        if current > peak:
+            peak = current
+        dd = peak - current
+        if dd > max_dd:
+            max_dd = dd
+    max_drawdown = float(max_dd)
+    return {
+        "total": total,
+        "n_trades": n,
+        "win_rate": float(win_rate),
+        "ev_per_trade": float(ev_per_trade),
+        "sharpe": float(sharpe),
+        "max_drawdown": max_drawdown,
+    }
+
+
+def compute_advanced_metrics(returns: List[float]) -> dict:
+    """Compute advanced performance metrics from a list of returns.
+    Returns a dictionary with: total, n_trades, win_rate, ev_per_trade,
+    sharpe, sortino, calmar, max_drawdown, and distribution statistics.
+    """
+    base = compute_performance_metrics(returns)
+    total = base.get("total", 0.0)
+    n = base.get("n_trades", 0)
+    max_dd = base.get("max_drawdown", 0.0)
+
+    # Calmar ratio: total return / max drawdown absolutized
+    calmar = total / (abs(max_dd) if max_dd != 0 else 1e-9)
+
+    arr = np.array(returns, dtype=float)
+    mean_ret = float(np.mean(arr)) if arr.size > 0 else 0.0
+    std_ret = float(np.std(arr)) if arr.size > 0 else 0.0
+    sharpe = (mean_ret / std_ret) if std_ret > 0 else 0.0
+
+    # Sortino: use downside deviation relative to zero
+    downs = arr[arr < 0]
+    if downs.size > 0:
+        downside_std = float(np.std(downs))
+        sortino = (mean_ret / downside_std) if downside_std > 0 else 0.0
+    else:
+        sortino = 0.0
+
+    distribution = None
+    if arr.size > 0:
+        probs = [25, 50, 75, 90, 95]
+        vals = np.percentile(arr, probs)
+        distribution = {
+            "p25": float(vals[0]),
+            "p50": float(vals[1]),
+            "p75": float(vals[2]),
+            "p90": float(vals[3]),
+            "p95": float(vals[4]),
+            "min": float(np.min(arr)),
+            "max": float(np.max(arr)),
+        }
+    else:
+        distribution = {
+            "p25": 0.0, "p50": 0.0, "p75": 0.0, "p90": 0.0, "p95": 0.0,
+            "min": 0.0, "max": 0.0
+        }
+
+    return {
+        **base,
+        "calmar": float(calmar),
+        "sortino": float(sortino),
+        "distribution": distribution
+    }
+
+
+def compute_return_distributions(returns: List[float], windows: int = 50) -> list:
+    """Compute rolling performance metrics across windows of returns.
+    Returns a list of dicts with metrics per window.
+    """
+    if returns is None or len(returns) == 0:
+        return []
+    results = []
+    for i in range(0, len(returns), max(1, windows)):
+        window = returns[i:i+windows]
+        results.append(compute_performance_metrics(window))
+    return results
+
+class MetricsMonitor:
+    def __init__(self, window_size: int = 200):
+        self.window = max(1, int(window_size))
+        self.returns: List[float] = []
+
+    def add_trade(self, value: float) -> None:
+        self.returns.append(float(value))
+        if len(self.returns) > self.window:
+            self.returns = self.returns[-self.window:]
+
+    def current_metrics(self) -> dict:
+        return compute_performance_metrics(self.returns)
 
 # ==================================================
 # CAPITULO 2:CLASE INDICADORES (CON TDI Y EMAS ESPECÍFICAS)
@@ -1088,8 +1429,8 @@ class IndicatorsPropios:
         c = close.values
         peaks_price, _ = find_peaks(c)
         peaks_tdi, _ = find_peaks(green)
-        trough_price, _ = find_peaks(-c)
-        trough_tdi, _ = find_peaks(-green)
+        trough_price, _ = find_peaks(-np.asarray(c, dtype=float))
+        trough_tdi, _ = find_peaks(-np.asarray(green, dtype=float))
         bear = False
         bull = False
         bear_bars = None
@@ -1501,8 +1842,8 @@ def detectar_patron_wm(df: pd.DataFrame, config) -> dict:
 
         try:
             if patron.get("direccion") == "CALL":
-                l2_p = float(patron.get("l2_p"))
-                l2_i = int(patron.get("l2_i"))
+                l2_p = safe_float(patron.get("l2_p"))
+                l2_i = safe_int(patron.get("l2_i"))
                 if bb_lower is not None:
                     bb_ok = l2_p <= (bb_lower + liq_dist_bb)
                 ext_low = float(np.min(low[start:])) if n - \
@@ -1510,8 +1851,8 @@ def detectar_patron_wm(df: pd.DataFrame, config) -> dict:
                 ext_ok = l2_p <= (ext_low + liq_dist_ext)
                 liq_ok = bool(bb_ok or ext_ok)
             else:
-                h2_p = float(patron.get("h2_p"))
-                h2_i = int(patron.get("h2_i"))
+                h2_p = safe_float(patron.get("h2_p"))
+                h2_i = safe_int(patron.get("h2_i"))
                 if bb_upper is not None:
                     bb_ok = h2_p >= (bb_upper - liq_dist_bb)
                 ext_high = float(
@@ -1643,12 +1984,18 @@ class MotorTradingIntegrado:
         if None in (precio, e50, e200) or precio == 0:
             return "NEUTRAL"
 
+        precio_v = safe_float(precio, 0.0)
+        e50_v = safe_float(e50, 0.0)
+        e200_v = safe_float(e200, 0.0)
+        if precio_v == 0.0:
+            return "NEUTRAL"
+
         min_sep = 0.001
-        sep = abs(e50 - e200) / precio
+        sep = abs(e50_v - e200_v) / precio_v
         if sep < min_sep:
             return "NEUTRAL"
 
-        dist_precio_ema = abs(precio - e50) / precio
+        dist_precio_ema = abs(precio_v - e50_v) / precio_v
         if dist_precio_ema > 0.005:
             return "NEUTRAL"
 
@@ -1664,10 +2011,11 @@ class MotorTradingIntegrado:
             ema50_prev = data.get("ema_50_prev")
         if ema50_prev is None:
             return "NEUTRAL"
+        ema50_prev_v = safe_float(ema50_prev, e50_v)
 
-        if precio > e50 > e200 and e50 > ema50_prev:
+        if precio_v > e50_v > e200_v and e50_v > ema50_prev_v:
             return "CALL"
-        if precio < e50 < e200 and e50 < ema50_prev:
+        if precio_v < e50_v < e200_v and e50_v < ema50_prev_v:
             return "PUT"
         return "NEUTRAL"
 
@@ -1694,15 +2042,20 @@ class MotorTradingIntegrado:
         if None in (green, red, rsi, green_prev):
             return "NEUTRAL"
 
-        if not 35 < rsi < 65:
+        green_v = safe_float(green, 0.0)
+        red_v = safe_float(red, 0.0)
+        rsi_v = safe_float(rsi, 50.0)
+        green_prev_v = safe_float(green_prev, green_v)
+
+        if not 35 < rsi_v < 65:
             return "NEUTRAL"
 
-        if abs(green - red) < 1.0:
+        if abs(green_v - red_v) < 1.0:
             return "NEUTRAL"
 
-        if green > red and green > green_prev:
+        if green_v > red_v and green_v > green_prev_v:
             return "CALL"
-        if green < red and green < green_prev:
+        if green_v < red_v and green_v < green_prev_v:
             return "PUT"
         return "NEUTRAL"
 
@@ -1790,7 +2143,7 @@ class MotorTradingIntegrado:
         try:
             if isinstance(data, dict) and data.get(
                     "ia_confianza_raw") is not None:
-                ia_raw = float(data.get("ia_confianza_raw"))
+                ia_raw = safe_float(data.get("ia_confianza_raw"), 0.0)
         except Exception:
             ia_raw = None
         if ia_raw is None:
@@ -2409,7 +2762,7 @@ class MotorTradingIntegrado:
                         else:
                             nn_pred = 0.0
                     else:
-                        raw = float(res)
+                        raw = safe_float(res, 0.0)
                         ia_confianza_raw = raw
                         if abs(raw - 50.0) < 1e-9:
                             nn_pred = 0.0
@@ -2652,6 +3005,7 @@ class BalanceManager:
 
 class ConfiguracionTrading:
     def __init__(self):
+        self.iq_bridge = None
 
         # ==========================================
         # SELECCIÓN DE PARES Y ACTIVOS (RESPALDO)
@@ -2837,7 +3191,7 @@ class ConfiguracionTrading:
         # ==========================================
         # 🛡️ PASO 3.4 – CONTROL DE PRODUCCIÓN
         # ==========================================
-        self.MODO_PRODUCCION = False          # 🔒 OFF por defecto
+        self.MODO_PRODUCCION = True           # ✅ ON por defecto (destrabar broker)
         self.AUTO_TRADING = True             # Control maestro
         self.AUTO_TRADING_HABILITADO = True  # Flag usado por ejecución binaria
         self.USAR_EJECUTOR_HUMANO = True      # Anti-baneo
@@ -3267,6 +3621,33 @@ class ConfiguracionTrading:
                         "MAX_TRADES_SESION", self.MAX_TRADES_SESION)
                     self.TIPO_CUENTA = data.get(
                         "TIPO_CUENTA", self.TIPO_CUENTA)
+                    self.MODO_PRODUCCION = bool(
+                        data.get("MODO_PRODUCCION", self.MODO_PRODUCCION))
+                    self.DRY_RUN = bool(
+                        data.get("DRY_RUN", self.DRY_RUN))
+                    self.AUTO_EJECUTAR_BROKER = bool(
+                        data.get(
+                            "AUTO_EJECUTAR_BROKER",
+                            self.AUTO_EJECUTAR_BROKER))
+                    self.AUTO_EJECUTAR_MIN_CONFIANZA = safe_float(
+                        data.get(
+                            "AUTO_EJECUTAR_MIN_CONFIANZA",
+                            self.AUTO_EJECUTAR_MIN_CONFIANZA),
+                        safe_float(self.AUTO_EJECUTAR_MIN_CONFIANZA, 85.0))
+                    self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG = safe_float(
+                        data.get(
+                            "AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG",
+                            self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG),
+                        safe_float(self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG, 30.0))
+                    self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG = safe_float(
+                        data.get(
+                            "AUTO_EJECUTAR_COOLDOWN_PAR_SEG",
+                            self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG),
+                        safe_float(self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG, 240.0))
+                    self.MAX_TRADES_POR_HORA = int(
+                        data.get("MAX_TRADES_POR_HORA", self.MAX_TRADES_POR_HORA))
+                    self.MAX_TRADES_POR_DIA = int(
+                        data.get("MAX_TRADES_POR_DIA", self.MAX_TRADES_POR_DIA))
 
                     # Cargar lista de pares guardada
                     self.PARES_TRADING = data.get(
@@ -3329,6 +3710,14 @@ class ConfiguracionTrading:
                 "DIAS_HISTORICOS_COLDSTART": self.DIAS_HISTORICOS_COLDSTART,
                 "MAX_TRADES_SESION": self.MAX_TRADES_SESION,
                 "TIPO_CUENTA": self.TIPO_CUENTA,
+                "MODO_PRODUCCION": self.MODO_PRODUCCION,
+                "DRY_RUN": self.DRY_RUN,
+                "AUTO_EJECUTAR_BROKER": self.AUTO_EJECUTAR_BROKER,
+                "AUTO_EJECUTAR_MIN_CONFIANZA": self.AUTO_EJECUTAR_MIN_CONFIANZA,
+                "AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG": self.AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG,
+                "AUTO_EJECUTAR_COOLDOWN_PAR_SEG": self.AUTO_EJECUTAR_COOLDOWN_PAR_SEG,
+                "MAX_TRADES_POR_HORA": self.MAX_TRADES_POR_HORA,
+                "MAX_TRADES_POR_DIA": self.MAX_TRADES_POR_DIA,
                 "PAPER_TRADING": self.MODO_PAPER_TRADING,
                 "PARES_TRADING": self.PARES_TRADING
             }
@@ -3527,14 +3916,14 @@ motor_trading = None
 
 
 try:
-    import lightgbm as lgb
+    import lightgbm as lgb  # pyright: ignore[reportMissingImports]
     LGBM_AVAILABLE = True
 except ImportError:
     LGBM_AVAILABLE = False
 
 
 try:
-    import lightgbm as lgb
+    import lightgbm as lgb  # pyright: ignore[reportMissingImports]
     LGBM_AVAILABLE = True
 except ImportError:
     LGBM_AVAILABLE = False
@@ -3627,7 +4016,7 @@ class MarketModeResolver:
         return resultado
 
     def obtener_rango_fechas(
-            self, perfil: str = None) -> Tuple[datetime, datetime]:
+            self, perfil: Optional[str] = None) -> Tuple[datetime, datetime]:
         """
         Calcula el rango de fechas para obtener datos históricos según el perfil.
         Returns:
@@ -3662,7 +4051,8 @@ class MarketModeResolver:
             if 'time' in df.columns:
                 df = df[df['time'].dt.weekday < 5]
             elif df.index.name == 'time' or isinstance(df.index, pd.DatetimeIndex):
-                df = df[df.index.weekday < 5]
+                dt_index = pd.DatetimeIndex(df.index)
+                df = df[dt_index.weekday < 5]
         return df
 
     def info(self) -> str:
@@ -3856,7 +4246,7 @@ class GeneradorDatosSinteticos:
         }
 
     def generar_datos_binarios(self, simbolo: str, timeframe: str = "5",
-                               fecha_inicio: datetime = None, fecha_fin: datetime = None,
+                               fecha_inicio: Optional[datetime] = None, fecha_fin: Optional[datetime] = None,
                                num_muestras: int = 5000, payout: float = 0.82) -> pd.DataFrame:
         """
         Genera datos sinteticos realistas para OPCIONES BINARIAS.
@@ -4053,8 +4443,11 @@ class GeneradorDatosSinteticos:
             high_low = df['high'] - df['low']
             high_close = np.abs(df['high'] - df['close'].shift())
             low_close = np.abs(df['low'] - df['close'].shift())
-            tr = pd.concat([high_low, high_close, low_close],
-                           axis=1).max(axis=1)
+            tr = pd.DataFrame({
+                'high_low': high_low,
+                'high_close': high_close,
+                'low_close': low_close,
+            }).max(axis=1)
             df['ATR'] = tr.rolling(window=14).mean()
             # Momentum
             df['momentum'] = df['close'] - df['close'].shift(10)
@@ -4074,13 +4467,13 @@ class GeneradorDatosSinteticos:
                 df['tendencia'] * 0.4  # Tendencia EMA
             )
             # Rellenar NaN con valores por defecto
-            df = df.fillna(method='bfill').fillna(method='ffill')
+            df = df.bfill().ffill()
             return df
         except Exception as e:
             logger.error(f"Error calculando indicadores: {e}")
             return df
 
-    def generar_dataset_entrenamiento(self, pares: List[str] = None,
+    def generar_dataset_entrenamiento(self, pares: Optional[List[str]] = None,
                                       num_muestras_por_par: int = 5000,
                                       payout: float = 0.82) -> pd.DataFrame:
         """
@@ -4186,7 +4579,7 @@ class OperationsRepository:
                     None),
                 dict) else {}
 
-            def _get_indicator(*keys, default=0):
+            def _get_indicator(*keys, default: Any = 0) -> Any:
                 for k in keys:
                     if k in indicadores_src:
                         return indicadores_src.get(k, default)
@@ -4272,7 +4665,7 @@ class OperationsRepository:
             logger.error(f"Error agregando trade: {e}")
 
     def obtener_trades_exitosos(
-            self, simbolo: str = None, direccion: str = None) -> List[dict]:
+            self, simbolo: Optional[str] = None, direccion: Optional[str] = None) -> List[dict]:
         """Obtiene trades exitosos filtrados por simbolo y/o direccion"""
         try:
             filtrados = [t for t in self.trades if t.get('exitoso', False)]
@@ -4429,7 +4822,7 @@ class EnsemblePredictor:
     3. Sin conflictos entre indicadores
     """
 
-    def __init__(self, operations_repo: OperationsRepository = None):
+    def __init__(self, operations_repo: Optional[OperationsRepository] = None):
         self.operations_repo = operations_repo or OperationsRepository()
         self.modelo_nn = None
         self.market_maker = None
@@ -4684,7 +5077,7 @@ class EnsemblePredictor:
 
     def predecir_con_market_maker(self, df: pd.DataFrame, indicadores: dict, simbolo: str,
                                   modelo_nn=None, market_maker_strategy=None,
-                                  df_diario: pd.DataFrame = None) -> dict:
+                                  df_diario: Optional[pd.DataFrame] = None) -> dict:
         """
         Prediccion avanzada que combina IA + Market Maker.
         Usa datos de precios (DataFrame) para analisis de patrones.
@@ -5025,7 +5418,7 @@ class EnsemblePredictor:
                             1, -1)
                         if mean.shape[1] == x.shape[1] and std.shape[1] == x.shape[1]:
                             x = (x - mean) / (std + 1e-8)
-                    elif hasattr(scaler, "transform"):
+                    elif not isinstance(scaler, dict) and hasattr(scaler, "transform"):
                         x = scaler.transform(x)
                 except Exception:
                     pass
@@ -5325,7 +5718,7 @@ class MarketMakerStrategy:
                 'tendencia_intradia': tendencia,
                 'rango_dia_pips': rango_dia * 10000,  # Convertir a pips
                 'recomendacion': self._obtener_recomendacion_intradia(
-                    sesion, stop_hunt_detectado, direccion_stop_hunt, tendencia
+                    sesion, stop_hunt_detectado, str(direccion_stop_hunt or ""), tendencia
                 )
             }
             if stop_hunt_detectado:
@@ -5364,9 +5757,9 @@ class MarketMakerStrategy:
         try:
             if len(df) < 20:
                 return {'patron': None, 'confianza': 0}
-            precios = df['close'].values
-            highs = df['high'].values
-            lows = df['low'].values
+            precios = df['close'].to_numpy(dtype=float, copy=False)
+            highs = df['high'].to_numpy(dtype=float, copy=False)
+            lows = df['low'].to_numpy(dtype=float, copy=False)
             # Buscar patron M (doble techo)
             patron_m = self._buscar_doble_techo(highs, precios)
             # Buscar patron W (doble suelo)
@@ -5782,7 +6175,7 @@ class MarketMakerStrategy:
             return {}
 
     # ========== METODO PRINCIPAL: GENERAR SENAL MARKET MAKER ==========
-    def generar_senal_mm(self, df: pd.DataFrame, df_diario: pd.DataFrame = None,
+    def generar_senal_mm(self, df: pd.DataFrame, df_diario: Optional[pd.DataFrame] = None,
                          simbolo: str = 'EURUSD') -> dict:
         """
         Genera senal de trading combinando todos los elementos del Metodo Market Maker.
@@ -6048,6 +6441,8 @@ class EstrategiaMultiTimeframe:
         self.config = config
         self.predictor_ia = predictor_ia
         self.repositorio = repositorio_trades
+        self.modelo_neuronal = None
+        self.escalador = None
         # Timeframes para análisis (en minutos) - SOLO 1m+5m para mejor
         # precisión
         self.timeframes = [1, 5]
@@ -6327,7 +6722,7 @@ class EstrategiaMultiTimeframe:
             # Simplificación: Usar ventana deslizante para encontrar máximos/mínimos locales
             high = df['high'].values
             low = df['low'].values
-            close = df['close'].values
+            close = df['close'].to_numpy(dtype=float, copy=False)
             
             # Buscar últimos 3 pivotes significativos (P1, P2, P3)
             # Para patrón M (Venta): Subida -> P1 (Techo 1) -> Bajada -> P2 (Suelo/Cuello) -> Subida -> P3 (Techo 2)
@@ -6634,6 +7029,7 @@ class EstrategiaMultiTimeframe:
                 return {'direccion': 'NEUTRAL', 'fuerza': 0,
                         'patrones': [], 'confirmacion': False}
             ultimas = df.tail(5)
+            patrones_detectados: List[str] = []
             # Última vela
             o1, h1, l1, c1 = ultimas.iloc[-1][['open', 'high', 'low', 'close']]
             cuerpo1 = abs(c1 - o1)
@@ -7683,7 +8079,7 @@ class HumanMouseExecutor:
     """
 
     def __init__(self, config=None, randomizar: bool = True,
-                 delay_min: float = None, delay_max: float = None):
+                 delay_min: Optional[float] = None, delay_max: Optional[float] = None):
         """
         Inicializa el executor humano.
 
@@ -7765,20 +8161,28 @@ class HumanMouseExecutor:
             ciclo = max(60, duracion_min * 60)
             restante = float(ciclo - (ts % ciclo))
 
+            # ✅ FIX: Si estamos cerca del final del ciclo, NO esperar
+            # Solo esperar si faltan > 15 segundos para el próximo ciclo
             if restante <= 8.0:
-                time.sleep(max(0.0, restante) + random.uniform(0.6, 1.4))
+                # Esperar solo lo necesario para el nuevo ciclo + pequeño delay
+                time.sleep(max(0.0, restante) + random.uniform(0.3, 0.6))
 
+            # Recalcular después de esperar
             restante = float(ciclo - (self._get_server_time(api) % ciclo))
-            apuro = restante <= 25.0
+            apuro = restante <= 25.0  # Menos de 25s = modo rápido
 
-            # Delays humanos antes de ejecutar
-            self._delay_humano(0.18, 0.55, permitir_extra=not apuro)
-            self._delay_humano(0.10, 0.28, permitir_extra=not apuro)
-            self._delay_humano(0.10, 0.32, permitir_extra=not apuro)
-            self._delay_humano(0.14, 0.55, permitir_extra=not apuro)
+            # ✅ FIX: Delays humanos REDUCIDOS para evitar "late"
+            # Original: 4-6 delays sumando 1-4 segundos
+            # Nuevo: 2-3 delays rápidos sumando 0.3-0.8 segundos
+            if not apuro:
+                # Modo normal: delays moderados
+                self._delay_humano(0.12, 0.25, permitir_extra=False)
+                self._delay_humano(0.08, 0.18, permitir_extra=False)
+            else:
+                # Modo apuro: delays mínimos
+                self._delay_humano(0.05, 0.12, permitir_extra=False)
 
-            if (not apuro) and random.random() < 0.25:
-                self._delay_humano(0.05, 0.16, permitir_extra=True)
+            # ✅ Eliminado delay extra aleatorio que causaba retrasos
 
             # API STABLE (IQ_Option_Stable)
             if IQOPTION_STABLE_AVAILABLE and hasattr(api, "buy"):
@@ -7895,14 +8299,25 @@ class HumanMouseExecutor:
     def _buy_with_retry_stable(self, api, monto: float, simbolo: str, action: str,
                                duracion_min: int, max_intentos: int = 2) -> Optional[int]:
         """
-        Compra con API stable con reintentos.
+        Compra con API stable con reintentos y timeout.
+        ✅ FIX: Timeout por intento + reducción de delays humanos
         """
         for intento in range(max_intentos):
             try:
+                # ✅ CRÍTICO: Timeout por intento de compra
+                start_time = time.time()
                 res = api.buy(monto, simbolo, action, int(duracion_min))
+                elapsed = time.time() - start_time
+
+                # Verificar si la llamada tomó demasiado tiempo
+                if elapsed > 10:
+                    self.logger.warning(f"[EMULACIÓN] API.buy() tomó {elapsed:.2f}s (lento)")
+
             except Exception as e:
                 self.logger.warning(f"[EMULACIÓN] Fallo API stable: {e}")
-                return None
+                if intento < (max_intentos - 1):
+                    time.sleep(0.5)  # Pequeña pausa antes de reintentar
+                continue
 
             # Procesar respuesta
             check = False
@@ -7926,14 +8341,15 @@ class HumanMouseExecutor:
             msg = str(raw_msg) if raw_msg is not None else ""
             self.logger.warning(f"[EMULACIÓN] Fallo API stable: {raw_msg}")
 
-            # Reintentar si es "late"
-            if ("late" in msg.lower()) and intento < (max_intentos - 1):
+            # Reintentar si es "late" o timeout
+            if ("late" in msg.lower() or "timeout" in msg.lower()) and intento < (max_intentos - 1):
                 ts = self._get_server_time(api)
                 ciclo = max(60, int(duracion_min) * 60)
                 restante = float(ciclo - (ts % ciclo))
-                time.sleep(max(0.0, restante) + random.uniform(0.6, 1.4))
+                time.sleep(max(0.0, restante) + random.uniform(0.3, 0.8))  # ✅ Reducido
                 continue
 
+            # No reintentar otros errores
             return None
 
         return None
@@ -8961,8 +9377,8 @@ class SeguimientoSenales:
                     senal.get('direccion', ''),
                     is_win,
                     float(beneficio),
-                    sesion.get("wins"),
-                    sesion.get("losses"),
+                    safe_int(sesion.get("wins"), 0),
+                    safe_int(sesion.get("losses"), 0),
                 )
             except Exception as e:
                 self.logger.warning(
@@ -9020,9 +9436,9 @@ class SeguimientoSenales:
             return
 
         try:
-            app = QApplication.instance()
+            app = cast(Any, QApplication).instance()
             if app:
-                for widget in app.topLevelWidgets():
+                for widget in cast(Any, app).topLevelWidgets():
                     if hasattr(widget, 'actualizar_lista_pares'):
                         widget.actualizar_lista_pares(self.pares_activos)
                         break
@@ -9035,9 +9451,9 @@ class SeguimientoSenales:
             return
 
         try:
-            app = QApplication.instance()
+            app = cast(Any, QApplication).instance()
             if app:
-                for widget in app.topLevelWidgets():
+                for widget in cast(Any, app).topLevelWidgets():
                     if hasattr(widget, 'actualizar_tabla_senales'):
                         datos_tabla = []
                         for par, senal in self.senales_actuales.items():
@@ -9477,7 +9893,7 @@ class AutoTrainer:
 
             # Scheduler más agresivo para converger rápido
             scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode='max', factor=0.5, patience=3, verbose=False, min_lr=1e-5
+                optimizer, mode='max', factor=0.5, patience=3, min_lr=1e-5
             )
 
             # Entrenar con epochs reducidos y early stopping agresivo
@@ -9909,6 +10325,7 @@ class IQOptionBridge:
         self.human_executor = HumanMouseExecutor()
         self.auto_trainer = AutoTrainer(self.operations_repo, config)
         self.ai_engine = AIEngineContinuous(config)
+        self.telegram_notifier = None
         # Inicializar MotorTradingIntegrado para uso interno (validaciones multi-TF, etc)
         self.motor_trading = MotorTradingIntegrado(config, self, self.ai_engine)
 
@@ -9992,15 +10409,16 @@ class IQOptionBridge:
         except Exception:
             return
 
-    def abrir_operacion(self, order_id: int, simbolo: str,
+    def abrir_operacion(self, order_id: Any, simbolo: str,
                         direccion: str, monto: float, duracion_min: int):
         try:
             now = datetime.now()
             duracion = int(duracion_min)
+            order_id_int = safe_int(order_id, 0)
             with self._ops_lock:
                 self.operacion_activa = True
                 self.operacion_actual = {
-                    "order_id": order_id,
+                    "order_id": order_id_int,
                     "simbolo": simbolo,
                     "direccion": direccion,
                     "monto": float(monto),
@@ -10011,7 +10429,7 @@ class IQOptionBridge:
                 existente = self.operaciones_activas.get(order_id)
                 if isinstance(existente, dict):
                     existente.update({
-                        "order_id": order_id,
+                    "order_id": order_id_int,
                         "simbolo": simbolo,
                         "direccion": direccion,
                         "monto": float(monto),
@@ -10233,7 +10651,7 @@ class IQOptionBridge:
             self.verificar_estado_pares()
         except Exception as e:
             logger.warning("Fallo carga dinámica, usando estáticos: %s", e)
-            self._fallback_a_estaticos(self.es_fin_de_semana)
+            self._fallback_a_estaticos(self.es_fin_de_semana())
         return self.pares_disponibles
 
     def _fallback_a_estaticos(self, es_otc: bool):
@@ -10308,7 +10726,10 @@ class IQOptionBridge:
         """Ejecuta una coroutine en el loop dedicado de la API."""
         if not self._api_loop or not self._api_loop.is_running():
             self._start_api_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, self._api_loop)
+        loop = self._api_loop
+        if loop is None or not loop.is_running():
+            return None
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
             return future.result(timeout=timeout)
         except Exception as e:
@@ -10365,9 +10786,12 @@ class IQOptionBridge:
                 return self.api.check_connect()
             elif self.api_mode == 'async':
                 async def _check():
-                    return await self.api.check_connect()
+                    result = self.api.check_connect()
+                    if asyncio.iscoroutine(result):
+                        return await result
+                    return bool(result)
                 result = self._run_in_api_loop(_check(), timeout=10)
-                return result if result else False
+                return bool(result)
             else:
                 return self.api.check_connect()
         except Exception as e:
@@ -10627,7 +11051,7 @@ class IQOptionBridge:
                     except Exception:
                         continue
 
-                    last_emitted = int(stream_state.get("last_emitted", 0))
+                    last_emitted = safe_int(stream_state.get("last_emitted", 0))
                     for ts in timestamps:
                         if ts <= last_emitted:
                             continue
@@ -10735,7 +11159,7 @@ class IQOptionBridge:
                     "callbacks": {},
                 }
         else:
-            prev_maxdict = int(stream_state.get("maxdict", 50))
+            prev_maxdict = safe_int(stream_state.get("maxdict", 50), 50)
             if maxdict > prev_maxdict:
                 try:
                     ok = False
@@ -10776,7 +11200,7 @@ class IQOptionBridge:
         for stream_key, stream_state in streams_items:
             simbolo = stream_state.get("simbolo")
             size = stream_state.get("size")
-            maxdict = int(stream_state.get("maxdict", 200))
+            maxdict = safe_int(stream_state.get("maxdict", 200), 200)
             if not simbolo or not size:
                 continue
             try:
@@ -10880,7 +11304,7 @@ class IQOptionBridge:
                     return
                 if evento.get("simbolo") != simbolo:
                     return
-                if int(evento.get("timeframe_segundos") or 0) != int(tf_seg):
+                if safe_int(evento.get("timeframe_segundos") or 0) != safe_int(tf_seg):
                     return
                 df = self.obtener_datos_tiempo_real(simbolo, cantidad=int(
                     cantidad_df), timeframe=str(int(tf_seg // 60)))
@@ -10929,7 +11353,9 @@ class IQOptionBridge:
             st = self._candles_streams.get(stream_key)
             if st:
                 buf = st.get("buffer_velas")
-                maxdict_stream = int(st.get("maxdict", max(200, cantidad)))
+                maxdict_stream = safe_int(
+                    st.get("maxdict", max(200, cantidad)),
+                    max(200, cantidad))
             else:
                 maxdict_stream = int(max(200, cantidad))
 
@@ -10940,10 +11366,10 @@ class IQOptionBridge:
 
         if isinstance(buf, deque) and len(buf) >= min(cantidad, 10):
             velas = list(buf)[-cantidad:]
-            velas_sorted = sorted(velas, key=lambda x: int(x.get("from", 0)))
+            velas_sorted = sorted(velas, key=lambda x: safe_int(x.get("from", 0)))
             ts_ultima = 0
             try:
-                ts_ultima = int(velas_sorted[-1].get("from", 0))
+                ts_ultima = safe_int(velas_sorted[-1].get("from", 0))
             except Exception:
                 ts_ultima = 0
             if ts_ultima and (ahora_ts - ts_ultima) <= umbral_vivo:
@@ -10975,7 +11401,7 @@ class IQOptionBridge:
             return None
 
         velas = [v for v in data.values() if isinstance(v, dict)]
-        velas_sorted = sorted(velas, key=lambda x: int(x.get("from", 0)))
+        velas_sorted = sorted(velas, key=lambda x: safe_int(x.get("from", 0)))
         return velas_sorted[-cantidad:] if len(
             velas_sorted) > cantidad else velas_sorted
 
@@ -11008,6 +11434,9 @@ class IQOptionBridge:
             return None, "API no inicializada"
 
         try:
+            api = self.api
+            if api is None:
+                return None, "API no inicializada"
             usar_emulacion = bool(
                 getattr(
                     self.config,
@@ -11023,7 +11452,7 @@ class IQOptionBridge:
                 direccion_emul = "CALL" if direccion_l == "call" else "PUT" if direccion_l == "put" else str(
                     direccion).upper()
                 order_id_emul = self.human_executor.ejecutar_orden_humana(
-                    self.api, activo, direccion_emul, float(monto), int(duracion or 5))
+                    api, activo, direccion_emul, float(monto), int(duracion or 5))
                 if order_id_emul is not None:
                     logger.info(
                         f"✅ Orden ejecutada (emulación): {activo} {direccion_l} ${monto} | ID: {order_id_emul}")
@@ -11038,14 +11467,19 @@ class IQOptionBridge:
 
             # Ejecutar según modo API
             if self.api_mode == 'stable':
-                check, order_id = self.api.buy(
+                check, order_id = api.buy(
                     monto, activo, direccion, duracion)
             elif self.api_mode == 'async':
                 async def _buy():
-                    return await self.api.buy(monto, activo, direccion, duracion)
-                check, order_id = self._run_in_api_loop(_buy(), timeout=15)
+                    result = api.buy(monto, activo, direccion, duracion)
+                    if asyncio.iscoroutine(result):
+                        return await result
+                    return result
+                buy_result = self._run_in_api_loop(_buy(), timeout=15)
+                if isinstance(buy_result, tuple) and len(buy_result) >= 2:
+                    check, order_id = bool(buy_result[0]), buy_result[1]
             else:
-                check, order_id = self.api.buy(
+                check, order_id = api.buy(
                     monto, activo, direccion, duracion)
 
             if check:
@@ -11063,14 +11497,23 @@ class IQOptionBridge:
     async def _connect_async_with_actives(self):
         """Conexión async robusta con set_max_reconnect(-1) y ACTIVES_OPCODE"""
         try:
-            success, reason = await self.api.connect()
+            api = self.api
+            if api is None:
+                return False, "API no inicializada"
+            connect_result = api.connect()
+            if asyncio.iscoroutine(connect_result):
+                success, reason = await connect_result
+            else:
+                success, reason = connect_result
             if success:
-                await self.api.change_balance(self.tipo_cuenta_actual)
+                balance_result = api.change_balance(self.tipo_cuenta_actual)
+                if asyncio.iscoroutine(balance_result):
+                    await balance_result
 
                 # ✅ APLICAR RECONEXIONES ILIMITADAS EN ASYNC
-                if hasattr(self.api, 'set_max_reconnect'):
+                if hasattr(api, 'set_max_reconnect'):
                     # Verificar si es coroutine o método síncrono
-                    set_reconnect_method = self.api.set_max_reconnect
+                    set_reconnect_method = api.set_max_reconnect
                     if asyncio.iscoroutinefunction(set_reconnect_method):
                         await set_reconnect_method(-1)
                         logger.info(
@@ -11085,12 +11528,12 @@ class IQOptionBridge:
 
                 # Actualizar ACTIVES (clave para OTC)
                 try:
-                    if hasattr(self.api, 'update_ACTIVES_OPCODE'):
+                    if hasattr(api, 'update_ACTIVES_OPCODE'):
                         if asyncio.iscoroutinefunction(
-                                self.api.update_ACTIVES_OPCODE):
-                            await self.api.update_ACTIVES_OPCODE()
+                                api.update_ACTIVES_OPCODE):
+                            await api.update_ACTIVES_OPCODE()
                         else:
-                            self.api.update_ACTIVES_OPCODE()
+                            api.update_ACTIVES_OPCODE()
                         logger.info(
                             "✅ ACTIVES_OPCODE actualizado (reconexión async)")
                 except Exception as opcode_err:
@@ -11480,7 +11923,7 @@ class IQOptionBridge:
             return []
 
     # --- METODOS AUXILIARES (Wrappers) ---
-    def _sync_get_all_available_products(self) -> Dict[str, Any]:
+    def _sync_get_all_available_products(self) -> Optional[Dict[str, Any]]:
         """Wrapper síncrono para get_all_available_products."""
         if not self.api:
             return None
@@ -13186,7 +13629,7 @@ class IQOptionBridge:
                     simbolo, timeframe, cantidad)
             if not velas:
                 velas = self._sync_get_candles(
-                    simbolo, timeframe, cantidad, end_time)
+                    simbolo, safe_int(timeframe, 0), cantidad, end_time)
 
             # Validación mínima de velas
             if not velas or len(velas) < self.config.MIN_CANDLES_REQUERIDAS:
@@ -13495,7 +13938,8 @@ class IQOptionBridge:
                 if accion_multi in ('CALL', 'PUT'):
                      alineacion_tf['alineado'] = True
                      alineacion_tf['direccion'] = accion_multi
-                     alineacion_tf['confianza'] = res_confluencia.get('confianza', 0.0) / 100.0
+                     alineacion_tf['confianza'] = safe_float(
+                         res_confluencia.get('confianza', 0.0), 0.0) / 100.0
                      alineacion_tf['tf_1m'] = 'OK'
                      
             # Generar prediccion combinada (IA + Market Maker)
@@ -13505,7 +13949,7 @@ class IQOptionBridge:
                 simbolo=simbolo,
                 modelo_nn=modelo_nn,
                 market_maker_strategy=self.market_maker_strategy,
-                df_diario=None  # Se puede agregar datos diarios para ciclo 3 dias
+                df_diario=pd.DataFrame()  # Se puede agregar datos diarios para ciclo 3 dias
             )
             # Si multi-TF está alineado, aumentar confianza
             if alineacion_tf['alineado']:
@@ -13524,17 +13968,19 @@ class IQOptionBridge:
                     'prediccion': prediccion
                 }
 
-            umbral = float(getattr(self.config, "UMBRAL_COMPRA", 92.0) or 92.0)
-            umbral_ia = float(
+            umbral = safe_float(getattr(self.config, "UMBRAL_COMPRA", 92.0), 92.0)
+            umbral_ia = safe_float(
                 getattr(
                     self.config,
                     "UMBRAL_IA_DIRECCION",
-                    umbral) or umbral)
-            umbral_tecnico = float(
+                    umbral),
+                umbral)
+            umbral_tecnico = safe_float(
                 getattr(
                     self.config,
                     "UMBRAL_TECNICO_DIRECCION",
-                    umbral) or umbral)
+                    umbral),
+                umbral)
 
             ia_conf = 0.0
             ia_dir = None
@@ -13587,7 +14033,9 @@ class IQOptionBridge:
             if tecnico_conf < umbral_tecnico:
                 return {'ejecutado': False,
                         'razon': 'tecnico_bajo_umbral', 'prediccion': prediccion}
-            if combinado < umbral:
+            umbral_combinado = calcular_umbral_combinado(
+                umbral, umbral_ia, umbral_tecnico)
+            if combinado < umbral_combinado:
                 return {'ejecutado': False,
                         'razon': 'combinado_bajo_umbral', 'prediccion': prediccion}
 
@@ -13637,8 +14085,11 @@ class IQOptionBridge:
                 f"🚀 Intentando operación en {simbolo}: {direccion_final} ${monto_final}")
 
             check, order_id = False, None
+            api = self.api
+            if api is None:
+                return {'ejecutado': False, 'razon': 'api_no_inicializada', 'prediccion': prediccion}
             try:
-                check, order_id = self.api.buy(
+                check, order_id = api.buy(
                     monto_final, simbolo, direccion_final, 1)  # Expiración 1 min
             except Exception as e:
                 logger.error(f"Fallo al ejecutar Binaria: {e}")
@@ -13648,7 +14099,7 @@ class IQOptionBridge:
                 logger.info(
                     "Binaria no disponible o fallida, intentando Digital Spot...")
                 try:
-                    check, order_id = self.api.buy_digital_spot(
+                    check, order_id = api.buy_digital_spot(
                         simbolo, monto_final, direccion_final.lower(), 1)
                 except Exception as e:
                     logger.error(f"Fallo al ejecutar Digital: {e}")
@@ -13743,8 +14194,8 @@ class IQOptionBridge:
                         operacion.get('direccion', ''),
                         exitoso,
                         ganancia,
-                        sesion.get("wins"),
-                        sesion.get("losses"),
+                        safe_int(sesion.get("wins"), 0),
+                        safe_int(sesion.get("losses"), 0),
                     )
                 except Exception as e:
                     logger.error(f"Error enviando resultado Telegram: {e}")
@@ -13752,7 +14203,7 @@ class IQOptionBridge:
                 tm = getattr(self, "trading_manager", None)
                 if tm is not None and hasattr(tm, "operaciones_cerradas"):
                     with tm.lock:
-                        ya = any(int(op.get('order_id', -1)) == int(order_id)
+                        ya = any(safe_int(op.get('order_id', -1), -1) == safe_int(order_id, -1)
                                  for op in tm.operaciones_cerradas if isinstance(op, dict))
                         if not ya:
                             fecha_apertura = operacion.get('fecha_apertura')
@@ -13768,7 +14219,7 @@ class IQOptionBridge:
                                                 "TIEMPO_EXPIRACION",
                                                 5) or 5))
                             tm.operaciones_cerradas.append({
-                                'order_id': int(order_id),
+                                'order_id': safe_int(order_id),
                                 'simbolo': str(operacion.get('simbolo', '')),
                                 'tipo': str(operacion.get('direccion', '')).upper(),
                                 'monto': float(operacion.get('monto', 0) or 0),
@@ -13781,7 +14232,7 @@ class IQOptionBridge:
                             })
                         tm.operaciones_abiertas = [
                             op for op in tm.operaciones_abiertas
-                            if not (isinstance(op, dict) and int(op.get('order_id', -1)) == int(order_id))
+                            if not (isinstance(op, dict) and safe_int(op.get('order_id', -1), -1) == safe_int(order_id, -1))
                         ]
                         tm.historial_operaciones.append({
                             'simbolo': operacion.get('simbolo', 'UNKNOWN'),
@@ -14751,7 +15202,7 @@ if TORCH_AVAILABLE:
             criterion = nn.BCELoss()  # Binary Cross Entropy para probabilidad
             optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode='min', factor=0.5, patience=10, verbose=False
+                optimizer, mode='min', factor=0.5, patience=10
             )
 
             # Historial
@@ -15139,7 +15590,7 @@ class TradingManager:
                 self.historial_operaciones.append(registro)
                 try:
                     if order_id is not None:
-                        ya = any(int(op.get('order_id', -1)) == int(order_id)
+                        ya = any(safe_int(op.get('order_id', -1), -1) == safe_int(order_id, -1)
                                  for op in self.operaciones_cerradas if isinstance(op, dict))
                         if not ya:
                             self.operaciones_cerradas.append({
@@ -15157,7 +15608,7 @@ class TradingManager:
                     if order_id is not None and self.operaciones_abiertas:
                         self.operaciones_abiertas = [
                             op for op in self.operaciones_abiertas
-                            if not (isinstance(op, dict) and int(op.get('order_id', -1)) == int(order_id))
+                            if not (isinstance(op, dict) and safe_int(op.get('order_id', -1), -1) == safe_int(order_id, -1))
                         ]
                     if len(self.operaciones_cerradas) > 200:
                         self.operaciones_cerradas = self.operaciones_cerradas[-200:]
@@ -15194,8 +15645,8 @@ class TradingManager:
                         direccion,
                         exitoso,
                         beneficio,
-                        sesion.get("wins"),
-                        sesion.get("losses"))
+                        safe_int(sesion.get("wins"), 0),
+                        safe_int(sesion.get("losses"), 0))
                 except Exception as e:
                     logger.error(f"Error enviando resultado a Telegram: {e}")
 
@@ -17099,19 +17550,8 @@ class SistemaNotificaciones:
         logger.info(
             "Telegram deshabilitado en configuración o credenciales faltantes")
 
-def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
-    try:
-        notif = SistemaNotificaciones(config, iq_bridge)
-        par = "EURUSD-OTC"
-        direccion = "CALL"
-        notif.notificar_senal_destacada(par, direccion, 88.0)
-        time.sleep(1)
-        notif.notificar_senal_confirmada(par, direccion, 93.0)
-        return True
-    except Exception:
-        return False
     def notificar_senal_destacada(
-            self, par: str, direccion: str, confianza: float = None):
+            self, par: str, direccion: str, confianza: Optional[float] = None):
         """
         Notifica una señal DESTACADA.
         Envía notificación a Telegram (texto) y al sistema operativo.
@@ -17364,6 +17804,19 @@ def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
                 logger.info("No hay AutoTrainer para guardar modelos")
         except Exception as e:
             logger.error(f"Error guardando modelos: {e}")
+
+
+def _prueba_telegram_envio(config: ConfiguracionTrading, iq_bridge=None):
+    try:
+        notif = SistemaNotificaciones(config, iq_bridge)
+        par = "EURUSD-OTC"
+        direccion = "CALL"
+        notif.notificar_senal_destacada(par, direccion, 88.0)
+        time.sleep(1)
+        notif.notificar_senal_confirmada(par, direccion, 93.0)
+        return True
+    except Exception:
+        return False
 
 # ========== HILO DE ENTRENAMIENTO ==========
 # CAPITULO 28:
@@ -18928,11 +19381,11 @@ class ConfiguracionDialog(QDialog):
             self.horario_trading_habilitado)
 
         self.horario_inicio = QLineEdit()
-        self.horario_inicio.setText(self.config.HORARIO_INICIO)
+        self.horario_inicio.setText(str(self.config.HORARIO_INICIO or ""))
         layout_trading.addRow("Hora Inicio (HH:MM):", self.horario_inicio)
 
         self.horario_fin = QLineEdit()
-        self.horario_fin.setText(self.config.HORARIO_FIN)
+        self.horario_fin.setText(str(self.config.HORARIO_FIN or ""))
         layout_trading.addRow("Hora Fin (HH:MM):", self.horario_fin)
 
         # Separador de modo de trading
@@ -19487,7 +19940,7 @@ class ConfiguracionDialog(QDialog):
 
         self.telegram_bot_token = QLineEdit()
         self.telegram_bot_token.setText(
-            self.config.TELEGRAM_BOT_TOKEN if hasattr(
+            str(self.config.TELEGRAM_BOT_TOKEN or "") if hasattr(
                 self.config, 'TELEGRAM_BOT_TOKEN') else "")
         self.telegram_bot_token.setPlaceholderText("Token del Bot de Telegram")
         self.telegram_bot_token.setEchoMode(QLineEdit.Password)
@@ -19495,14 +19948,14 @@ class ConfiguracionDialog(QDialog):
 
         self.telegram_chat_id = QLineEdit()
         self.telegram_chat_id.setText(
-            self.config.TELEGRAM_CHAT_ID if hasattr(
+            str(self.config.TELEGRAM_CHAT_ID or "") if hasattr(
                 self.config, 'TELEGRAM_CHAT_ID') else "")
         self.telegram_chat_id.setPlaceholderText("ID del Chat o Canal")
         layout_telegram.addRow("Chat ID:", self.telegram_chat_id)
 
         self.telegram_zona_horaria = QLineEdit()
         self.telegram_zona_horaria.setText(
-            self.config.TELEGRAM_ZONA_HORARIA if hasattr(
+            str(self.config.TELEGRAM_ZONA_HORARIA or "UTC-3") if hasattr(
                 self.config, 'TELEGRAM_ZONA_HORARIA') else "UTC-3")
         layout_telegram.addRow("Zona Horaria:", self.telegram_zona_horaria)
 
@@ -19555,13 +20008,13 @@ class ConfiguracionDialog(QDialog):
 
         self.iq_email = QLineEdit()
         self.iq_email.setPlaceholderText("correo@ejemplo.com")
-        self.iq_email.setText(creds.get('email', ''))
+        self.iq_email.setText(str(creds.get('email', '') or ""))
         layout_iq_creds.addRow("Email:", self.iq_email)
 
         self.iq_password = QLineEdit()
         self.iq_password.setEchoMode(QLineEdit.Password)
         self.iq_password.setPlaceholderText("Tu contraseña")
-        self.iq_password.setText(creds.get('password', ''))
+        self.iq_password.setText(str(creds.get('password', '') or ""))
         layout_iq_creds.addRow("Password:", self.iq_password)
 
         # Tipo de cuenta
@@ -20294,6 +20747,7 @@ if GUI_AVAILABLE:
             self._live_worker_thread = None
             self._auto_exec_last_global = 0.0
             self._auto_exec_last_par = {}
+            self._auto_exec_block_log_ts = {}   # throttle: razon -> ultimo ts log
             # Variables de estado
             self.escaneo_activo = False
             self.modelo_entrenado = False
@@ -20524,14 +20978,14 @@ if GUI_AVAILABLE:
                         conteos = snapshot.get(
                             "conteos", {}) if isinstance(
                             snapshot, dict) else {}
-                        total = int(conteos.get("total_activos", len(pares)))
-                        forex = int(conteos.get("forex", 0))
-                        otc = int(conteos.get("otc", 0))
-                        crypto = int(conteos.get("crypto", 0))
-                        indices = int(conteos.get("indices", 0))
-                        binarias = int(conteos.get("binarias", 0))
-                        turbo = int(conteos.get("turbo", 0))
-                        digitales = int(conteos.get("digitales", 0))
+                        total = safe_int(conteos.get("total_activos", len(pares)), len(pares))
+                        forex = safe_int(conteos.get("forex", 0))
+                        otc = safe_int(conteos.get("otc", 0))
+                        crypto = safe_int(conteos.get("crypto", 0))
+                        indices = safe_int(conteos.get("indices", 0))
+                        binarias = safe_int(conteos.get("binarias", 0))
+                        turbo = safe_int(conteos.get("turbo", 0))
+                        digitales = safe_int(conteos.get("digitales", 0))
                         txt_stats = f"📊 Pares activos: {total} (Forex: {forex}, OTC: {otc}, Crypto: {crypto}, Índices: {indices} | Binarias: {binarias}, Turbo: {turbo}, Digitales: {digitales})"
                     except Exception:
                         txt_stats = f"📊 Pares activos: {len(pares)}"
@@ -20688,7 +21142,7 @@ if GUI_AVAILABLE:
             )
             self.trade_thread.start()
 
-            self.log_message("🚀 BOT INICIADO – IA ACTIVA Y ENTRENADA")
+            self.log_message("��� BOT INICIADO – IA ACTIVA Y ENTRENADA")
 
             # ==================================================
             # 7. ACTUALIZAR UI (SI EXISTE)
@@ -22741,42 +23195,66 @@ if GUI_AVAILABLE:
                 self._live_worker = None
                 self._live_worker_thread = None
 
+        def _auto_exec_block_reason(self, resultados: dict) -> str | None:
+            """Devuelve la razón exacta de bloqueo de auto-ejecución, o None si no hay bloqueo."""
+            if not isinstance(resultados, dict) or not resultados:
+                return "sin_resultados"
+            if getattr(self.config, "MODO_PAPER_TRADING", True):
+                return "paper_trading_activo"
+            if not getattr(self.config, "AUTO_EJECUTAR_BROKER", False):
+                return "auto_ejecutar_broker_off"
+            if not getattr(self.config, "AUTO_TRADING_HABILITADO", False):
+                return "auto_trading_habilitado_off"
+            if getattr(self.config, "PAUSADO_POR_OBJETIVO", False):
+                return "pausado_por_objetivo"
+            if getattr(self.config, "KILL_SWITCH", False):
+                return "kill_switch_activo"
+            if not getattr(self.config, "MODO_PRODUCCION", False):
+                return "modo_produccion_off"
+            if getattr(self.config, "DRY_RUN", False):
+                return "dry_run_activo"
+            if not getattr(self.iq_bridge, "connected", False):
+                return "desconectado_iq"
+            if getattr(self.iq_bridge, "operacion_activa", False):
+                return "operacion_activa_en_curso"
+            if getattr(self.seguimiento_senales, "senales_activas", None):
+                if self.seguimiento_senales.senales_activas:
+                    return "señal_activa_en_seguimiento"
+            ahora = time.time()
+            cooldown_global = float(
+                getattr(self.config, "AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG", 30) or 0)
+            if cooldown_global > 0 and (
+                    ahora - float(self._auto_exec_last_global or 0.0)) < cooldown_global:
+                restante = cooldown_global - (ahora - float(self._auto_exec_last_global or 0.0))
+                return f"cooldown_global ({restante:.0f}s restantes)"
+            return None
+
+        def _auto_exec_log_throttled(self, razon: str, mensaje: str,
+                                     intervalo_seg: float = 30.0):
+            """Registra un mensaje de bloqueo con throttling por razón para no saturar logs."""
+            ahora = time.time()
+            ultimo = float(self._auto_exec_block_log_ts.get(razon, 0.0) or 0.0)
+            if (ahora - ultimo) >= intervalo_seg:
+                self._auto_exec_block_log_ts[razon] = ahora
+                logger.debug(mensaje)
+                if hasattr(self, "log_mensaje"):
+                    try:
+                        self.log_mensaje(mensaje)
+                    except Exception:
+                        pass
+
         def _intentar_auto_ejecucion(self, resultados: dict):
             try:
-                if not isinstance(resultados, dict) or not resultados:
+                razon_bloqueo = self._auto_exec_block_reason(resultados)
+                if razon_bloqueo:
+                    self._auto_exec_log_throttled(
+                        razon_bloqueo,
+                        f"⛔ Auto-ejecución bloqueada: {razon_bloqueo}",
+                        intervalo_seg=30.0
+                    )
                     return
-                if getattr(self.config, "MODO_PAPER_TRADING", True):
-                    return
-                if not getattr(self.config, "AUTO_EJECUTAR_BROKER", False):
-                    return
-                if not getattr(self.config, "AUTO_TRADING_HABILITADO", False):
-                    return
-                if getattr(self.config, "PAUSADO_POR_OBJETIVO", False):
-                    return
-                if getattr(self.config, "KILL_SWITCH", False):
-                    return
-                if not getattr(self.config, "MODO_PRODUCCION", False):
-                    return
-                if getattr(self.config, "DRY_RUN", False):
-                    return
-                if not getattr(self.iq_bridge, "connected", False):
-                    return
-                if getattr(self.iq_bridge, "operacion_activa", False):
-                    return
-                if getattr(self.seguimiento_senales, "senales_activas", None):
-                    if self.seguimiento_senales.senales_activas:
-                        return
 
                 ahora = time.time()
-                cooldown_global = float(
-                    getattr(
-                        self.config,
-                        "AUTO_EJECUTAR_COOLDOWN_GLOBAL_SEG",
-                        30) or 0)
-                if cooldown_global > 0 and (
-                        ahora - float(self._auto_exec_last_global or 0.0)) < cooldown_global:
-                    return
-
                 min_conf = float(
                     getattr(
                         self.config,
@@ -22785,8 +23263,11 @@ if GUI_AVAILABLE:
                             self.config,
                             "UMBRAL_SEÑAL_DESTACADA",
                             85.0)) or 0.0)
+                cooldown_par = float(
+                    getattr(self.config, "AUTO_EJECUTAR_COOLDOWN_PAR_SEG", 180) or 0)
 
                 mejor = None
+                razones_filtrado = []
                 for par, datos in resultados.items():
                     if not isinstance(datos, dict):
                         continue
@@ -22795,33 +23276,48 @@ if GUI_AVAILABLE:
                         continue
                     conf = float(datos.get("confianza", 0) or 0)
                     if conf < min_conf:
+                        razones_filtrado.append(
+                            f"{par}: confianza {conf:.1f}% < mínimo {min_conf:.1f}%")
                         continue
                     tipo = str(
-                        datos.get(
-                            "tipo_datos",
-                            "REAL") or "REAL").upper()
+                        datos.get("tipo_datos", "REAL") or "REAL").upper()
                     if tipo != "REAL":
+                        razones_filtrado.append(f"{par}: tipo_datos={tipo} (requiere REAL)")
                         continue
-                    last_par = float(
-                        self._auto_exec_last_par.get(
-                            par, 0.0) or 0.0)
-                    cooldown_par = float(
-                        getattr(
-                            self.config,
-                            "AUTO_EJECUTAR_COOLDOWN_PAR_SEG",
-                            180) or 0)
+                    last_par = float(self._auto_exec_last_par.get(par, 0.0) or 0.0)
                     if cooldown_par > 0 and (ahora - last_par) < cooldown_par:
+                        restante = cooldown_par - (ahora - last_par)
+                        razones_filtrado.append(
+                            f"{par}: cooldown_par {restante:.0f}s restantes")
                         continue
                     if mejor is None or conf > float(mejor[2]):
                         mejor = (par, datos, conf)
 
                 if mejor is None:
+                    if razones_filtrado:
+                        resumen = "; ".join(razones_filtrado[:5])
+                        self._auto_exec_log_throttled(
+                            "sin_señal_elegible",
+                            f"🔍 Sin señal elegible para auto-ejecución: {resumen}",
+                            intervalo_seg=60.0
+                        )
+                    else:
+                        self._auto_exec_log_throttled(
+                            "sin_señal_accionable",
+                            "🔍 Sin señal accionable (CALL/PUT) en resultados actuales",
+                            intervalo_seg=60.0
+                        )
                     return
 
                 par, datos, conf = mejor
                 indicadores = datos.get("indicadores", {}) or {}
                 precio = float(datos.get("precio", 0) or 0)
                 if precio <= 0:
+                    self._auto_exec_log_throttled(
+                        "precio_invalido",
+                        f"⚠️ Auto-ejecución cancelada: precio inválido para {par}",
+                        intervalo_seg=30.0
+                    )
                     return
 
                 senal_id = self.seguimiento_senales.registrar_senal_destacada(
@@ -22838,8 +23334,14 @@ if GUI_AVAILABLE:
                         self.trading_manager.iniciar_monitoreo()
                     self.log_mensaje(
                         f"🤖 AUTO-EJECUCIÓN ARMADA: {par} {datos.get('accion')} ({conf:.1f}%)")
-            except Exception:
-                return
+                else:
+                    self._auto_exec_log_throttled(
+                        "senal_no_registrada",
+                        f"⚠️ Auto-ejecución: señal no registrada para {par} ({conf:.1f}%)",
+                        intervalo_seg=30.0
+                    )
+            except Exception as exc:
+                logger.warning(f"[_intentar_auto_ejecucion] Error: {exc}")
 
         def _on_pares_actualizados(self, pares: list):
             """Callback cuando los pares disponibles se actualizan desde el worker."""
@@ -22882,13 +23384,13 @@ if GUI_AVAILABLE:
                         conteos.get(
                             "total_activos", len(
                                 self.config.PARES_DETECTADOS_IQ or [])))
-                    forex = int(conteos.get("forex", 0))
-                    otc = int(conteos.get("otc", 0))
-                    crypto = int(conteos.get("crypto", 0))
-                    indices = int(conteos.get("indices", 0))
-                    binarias = int(conteos.get("binarias", 0))
-                    turbo = int(conteos.get("turbo", 0))
-                    digitales = int(conteos.get("digitales", 0))
+                    forex = safe_int(conteos.get("forex", 0))
+                    otc = safe_int(conteos.get("otc", 0))
+                    crypto = safe_int(conteos.get("crypto", 0))
+                    indices = safe_int(conteos.get("indices", 0))
+                    binarias = safe_int(conteos.get("binarias", 0))
+                    turbo = safe_int(conteos.get("turbo", 0))
+                    digitales = safe_int(conteos.get("digitales", 0))
                     txt_stats = f"📊 Pares activos: {total} (Forex: {forex}, OTC: {otc}, Crypto: {crypto}, Índices: {indices} | Binarias: {binarias}, Turbo: {turbo}, Digitales: {digitales})"
                     self.lbl_pares_stats.setText(txt_stats)
                     self.lbl_pares_stats.setStyleSheet(
@@ -23556,7 +24058,9 @@ def run_headless_mode():
 
                     for trade in paper_trades:
                         if current_time - \
-                                trade['entry_time'] >= int(trade.get('expiry_seconds', paper_expiracion_segundos)):
+                        trade['entry_time'] >= safe_int(
+                            trade.get('expiry_seconds', paper_expiracion_segundos),
+                            safe_int(paper_expiracion_segundos, 0)):
                             try:
                                 # Get current price to determine win/loss
                                 datos = bridge.obtener_datos_tiempo_real(
@@ -23763,13 +24267,21 @@ def run_headless_mode():
                         confianza_combinada = (
                             confianza_ia * peso_ia) + (confianza_tecnica * peso_tecnico)
 
-                        # Umbral mínimo para operar
-                        umbral = float(getattr(config, 'UMBRAL_COMPRA', 92.0))
+                        # Umbrales coherentes para operar
+                        umbral = safe_float(getattr(config, 'UMBRAL_COMPRA', 92.0), 92.0)
+                        umbral_ia = safe_float(
+                            getattr(config, 'UMBRAL_IA_DIRECCION', umbral),
+                            umbral)
+                        umbral_tecnico = safe_float(
+                            getattr(config, 'UMBRAL_TECNICO_DIRECCION', umbral),
+                            umbral)
+                        umbral_combinado = calcular_umbral_combinado(
+                            umbral, umbral_ia, umbral_tecnico)
 
                         if (
-                            confianza_ia >= umbral
-                            and confianza_tecnica >= umbral
-                            and confianza_combinada >= umbral
+                            confianza_ia >= umbral_ia
+                            and confianza_tecnica >= umbral_tecnico
+                            and confianza_combinada >= umbral_combinado
                             and prediccion.get('operar', False)
                         ):
                             direccion = prediccion.get('direccion', 'CALL')
@@ -23824,7 +24336,7 @@ def run_headless_mode():
                             break  # Solo 1 trade a la vez - salir del loop de pares
                         else:
                             if prediccion.get(
-                                    'operar', False) and confianza_tecnica >= umbral:
+                                    'operar', False) and confianza_tecnica >= umbral_tecnico:
                                 logger.info(
                                     f"[PAPER] Señal técnica/MM fuerte en {par} ({
                                         prediccion.get('direccion')}) "
@@ -23832,8 +24344,8 @@ def run_headless_mode():
                                         confianza_ia:.1f}% | Técnico={
                                         confianza_tecnica:.1f}% | "
                                     f"Combinado={
-                                        confianza_combinada:.1f}% < umbral {
-                                        umbral:.1f}%"
+                                        confianza_combinada:.1f}% < umbral combinado {
+                                        umbral_combinado:.1f}%"
                                 )
                             else:
                                 logger.debug(
