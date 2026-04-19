@@ -654,6 +654,56 @@ class DecisionInteligenteSistema:
     # 5. RETROALIMENTACIÓN Y MEJORA CONTINUA
     # =========================================================
     
+    def registrar_retroalimentacion(self, simbolo: str, direccion: str, 
+                                     exitoso: bool, ganancia: float,
+                                     indicadores: dict, prediccion_ia: dict = None):
+        """
+        Registra el resultado de un trade para mejorar futuras decisiones
+        
+        Args:
+            simbolo: Par de divisas (ej: EURUSD)
+            direccion: CALL o PUT
+            exitoso: True si fue WIN, False si fue LOSS
+            ganancia: Monto ganado/perdido
+            indicadores: Diccionario con indicadores técnicos al momento del trade
+            prediccion_ia: Predicción de IA usada
+        """
+        try:
+            trade_info = {
+                'timestamp': datetime.now().isoformat(),
+                'simbolo': simbolo,
+                'direccion': direccion,
+                'exitoso': exitoso,
+                'ganancia': ganancia,
+                'indicadores': indicadores,
+                'prediccion_ia': prediccion_ia or {},
+                'resultado': 'WIN' if exitoso else 'LOSS'
+            }
+            
+            # Usar método existente
+            self.registrar_resultado_trade(trade_info)
+            
+            # Actualizar estadísticas
+            self.estadisticas['total_decisiones'] += 1
+            if exitoso:
+                self.estadisticas['decisiones_correctas'] += 1
+            
+            # Calcular win rate actualizado
+            if self.estadisticas['total_decisiones'] > 0:
+                self.estadisticas['win_rate_general'] = (
+                    self.estadisticas['decisiones_correctas'] / 
+                    self.estadisticas['total_decisiones']
+                )
+            
+            self.logger.info(
+                f"📊 Retroalimentación registrada | {simbolo} {direccion} | "
+                f"{'✅ WIN' if exitoso else '❌ LOSS'} ${ganancia:.2f} | "
+                f"Win Rate: {self.estadisticas['win_rate_general']:.1%}"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error registrando retroalimentación: {e}")
+    
     def registrar_resultado_trade(self, trade_info: dict):
         """
         Registra el resultado de un trade para mejorar futuras decisiones

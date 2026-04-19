@@ -53,6 +53,13 @@ import argparse
 import traceback
 from queue import Queue, Empty
 from collections import deque
+# Importar Sistema de Decisión Inteligente
+try:
+    from sistema_decision_inteligente import DecisionInteligenteSistema
+    DECISION_INTELIGENTE_DISPONIBLE = True
+except ImportError as e:
+    DECISION_INTELIGENTE_DISPONIBLE = False
+    print(f"⚠️ Sistema de Decisión Inteligente no disponible: {e}")
 # Parsear argumentos de línea de comandos PRIMERO
 _parser = argparse.ArgumentParser(description='IQ Option Trading Bot 2.0')
 _parser.add_argument(
@@ -10328,6 +10335,24 @@ class IQOptionBridge:
         self.telegram_notifier = None
         # Inicializar MotorTradingIntegrado para uso interno (validaciones multi-TF, etc)
         self.motor_trading = MotorTradingIntegrado(config, self, self.ai_engine)
+        
+        # ========================================
+        # SISTEMA DE DECISIÓN INTELIGENTE
+        # ========================================
+        if DECISION_INTELIGENTE_DISPONIBLE:
+            try:
+                self.sistema_decision = DecisionInteligenteSistema(
+                    config=config,
+                    ai_engine=self.ai_engine,
+                    datos_dir="Datos"
+                )
+                logger.info("✅ Sistema de Decisión Inteligente activado")
+            except Exception as e:
+                logger.warning(f"⚠️ Error inicializando Sistema de Decisión: {e}")
+                self.sistema_decision = None
+        else:
+            self.sistema_decision = None
+            logger.info("ℹ️ Sistema de Decisión Inteligente no disponible (modo estándar)")
 
         self.sesion_inicio = datetime.now()
         self.sesion_wins = 0
@@ -13951,6 +13976,70 @@ class IQOptionBridge:
                 market_maker_strategy=self.market_maker_strategy,
                 df_diario=pd.DataFrame()  # Se puede agregar datos diarios para ciclo 3 dias
             )
+            
+            # =====================================================
+            # SISTEMA DE DECISIÓN INTELIGENTE - OPTIMIZACIÓN
+            # =====================================================
+            if self.sistema_decision is not None:
+                logger.info(f"🧠 Analizando decisión con Sistema Inteligente para {simbolo}...")
+                
+                # Obtener predicción de IA
+                prediccion_ia = None
+                if self.ai_engine and hasattr(self.ai_engine, "predict_latest"):
+                    try:
+                        conf_ia, meta_ia = self.ai_engine.predict_latest(df_5m)
+                        prediccion_ia = {
+                            'direccion': meta_ia.get('direccion') if isinstance(meta_ia, dict) else None,
+                            'confianza': float(conf_ia or 0.0)
+                        }
+                    except Exception as e:
+                        logger.warning(f"Error obteniendo predicción IA: {e}")
+                
+                # Usar sistema de decisión inteligente
+                decision_optima = self.sistema_decision.tomar_decision_optimizada(
+                    df=df_5m,
+                    indicadores=indicadores,
+                    prediccion_ia=prediccion_ia,
+                    simbolo=simbolo
+                )
+                
+                # Si el sistema recomienda NO OPERAR, respetar la decisión
+                if decision_optima and not decision_optima.get('operar', True):
+                    logger.info(
+                        f"🚫 Sistema Inteligente recomienda NO OPERAR: {decision_optima.get('razon', 'Sin razón')} | "
+                        f"Confianza: {decision_optima.get('confianza_final', 0):.1%}"
+                    )
+                    return {
+                        'ejecutado': False,
+                        'razon': 'sistema_inteligente_no_recomienda',
+                        'prediccion': prediccion,
+                        'decision_inteligente': decision_optima
+                    }
+                
+                # Si hay decisión del sistema inteligente, ajustar confianza
+                if decision_optima and decision_optima.get('operar', False):
+                    confianza_original = prediccion.get('confianza', 0.0)
+                    confianza_ai = decision_optima.get('confianza_final', confianza_original)
+                    
+                    # Usar la confianza del sistema inteligente si es más conservadora
+                    if confianza_ai < confianza_original:
+                        prediccion['confianza'] = confianza_ai
+                        prediccion['operar'] = prediccion['confianza'] >= self.ensemble_predictor.umbral_confianza
+                        logger.info(
+                            f"⚖️ Confianza ajustada por Sistema Inteligente: "
+                            f"{confianza_original:.1%} → {confianza_ai:.1%}"
+                        )
+                    
+                    # Agregar información de la decisión inteligente
+                    prediccion['decision_inteligente'] = decision_optima
+                    logger.info(
+                        f"✅ Sistema Inteligente APRUEBA operación | "
+                        f"Confianza final: {confianza_ai:.1%} | "
+                        f"Factores: IA={decision_optima.get('score_ia', 0):.0f}%, "
+                        f"Histórico={decision_optima.get('score_patron', 0):.0f}%, "
+                        f"Mercado={decision_optima.get('score_mercado', 0):.0f}%"
+                    )
+            
             # Si multi-TF está alineado, aumentar confianza
             if alineacion_tf['alineado']:
                 bonus_tf = 0.05  # Bonus por alineación multi-TF
@@ -14180,6 +14269,23 @@ class IQOptionBridge:
             self.ensemble_predictor.registrar_resultado(
                 operacion.get('prediccion', {}), exitoso
             )
+            
+            # ========================================
+            # REGISTRAR RESULTADO EN SISTEMA INTELIGENTE
+            # ========================================
+            if self.sistema_decision is not None:
+                try:
+                    self.sistema_decision.registrar_retroalimentacion(
+                        simbolo=operacion.get('simbolo'),
+                        direccion=operacion.get('direccion'),
+                        exitoso=exitoso,
+                        ganancia=ganancia,
+                        indicadores=indicadores,
+                        prediccion_ia=operacion.get('prediccion', {})
+                    )
+                except Exception as e:
+                    logger.warning(f"Error registrando retroalimentación en Sistema Inteligente: {e}")
+            
             # Registrar ganancia para objetivo diario
             self._registrar_ganancia_operacion(ganancia)
             # Actualizar balance actual
