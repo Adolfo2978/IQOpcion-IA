@@ -26,7 +26,7 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 APP_NAME = 'IQ_Bot_Pro v 2.0'
 APP_VERSION = '2.0.0'
-MAIN_SCRIPT = 'IQ_Opcion_IA_2.8.4.py'
+MAIN_SCRIPT = 'IQ_Option_Bot 2.8.5.py'
 
 # Directorio base del proyecto
 BASE_DIR = Path(SPEC).parent
