@@ -556,9 +556,12 @@ class FeatureExtractor:
             # Return zeros para evitar usar datos futuros
             return np.zeros((1, 15), dtype=np.float32)
 
-        # Asegurar tipos
-        for col in ['open', 'high', 'low', 'close', 'volume']:
+        # Asegurar tipos — 'volume' es opcional (IQ Option a veces no lo envía)
+        for col in ['open', 'high', 'low', 'close']:
             df[col] = df[col].astype(float)
+        if 'volume' not in df.columns:
+            df['volume'] = 1.0
+        df['volume'] = df['volume'].astype(float)
 
         # ===============================
         # 1️⃣ TENDENCIA (EMA)
@@ -707,11 +710,6 @@ class AIEngineContinuous:
         🚫 La IA NUNCA habilita trading si confianza < UMBRAL (default 85%)
         """
         # Validación de entrada para seguridad
-        if df is None or not isinstance(df, pd.DataFrame):
-            self.logger.error("[IA] DF inválido: se esperaba un DataFrame de pandas")
-            self._last_direction = None
-            return 0.0, {"estado": "DF_INVALIDO"}
-        # Validación de entrada
         if df is None or not isinstance(df, pd.DataFrame):
             self.logger.error("[IA] DF inválido: se esperaba un DataFrame de pandas")
             self._last_direction = None
@@ -3512,13 +3510,6 @@ except ImportError:
     LGBM_AVAILABLE = False
 
 
-try:
-    import lightgbm as lgb  # pyright: ignore[reportMissingImports]
-    LGBM_AVAILABLE = True
-except ImportError:
-    LGBM_AVAILABLE = False
-
-
 # Instancia global del motor de trading
 # ========== RESOLUTOR DE MODO DE MERCADO ==========
 # CAPITULO 10:
@@ -4244,6 +4235,152 @@ class OperationsRepository:
         except Exception as e:
             logger.error(f"Error obteniendo estadisticas: {e}")
             return {}
+
+    def buscar_por_contexto(
+            self,
+            simbolo: Optional[str] = None,
+            patron: Optional[str] = None,
+            hora_inicio: Optional[int] = None,
+            hora_fin: Optional[int] = None,
+            resultado: Optional[bool] = None,
+            ultimos_n: int = 200) -> List[dict]:
+        """
+        Busca trades por contexto: activo, patron de señal, rango horario y resultado.
+        Permite al SignalMetaValidator encontrar casos historicos similares.
+
+        Args:
+            simbolo: Filtrar por par (ej. 'EURUSD')
+            patron: Tipo de patron/motivo de señal (ej. 'IA_TECNICO_ALINEADOS')
+            hora_inicio: Hora UTC de inicio del rango (0-23)
+            hora_fin: Hora UTC de fin del rango (0-23)
+            resultado: True=solo exitosos, False=solo fallidos, None=todos
+            ultimos_n: Cuantos trades recientes considerar
+
+        Returns:
+            Lista de trades que cumplen todos los filtros
+        """
+        try:
+            muestra = self.trades[-ultimos_n:] if len(self.trades) > ultimos_n else self.trades
+            filtrados = muestra
+
+            if simbolo:
+                filtrados = [t for t in filtrados if t.get('simbolo') == simbolo]
+            if patron:
+                filtrados = [t for t in filtrados
+                             if patron.upper() in str(t.get('motivo', '')).upper()
+                             or patron.upper() in str(t.get('tipo_senal', '')).upper()]
+            if hora_inicio is not None or hora_fin is not None:
+                def _hora_trade(t: dict) -> int:
+                    try:
+                        ts = t.get('timestamp', '')
+                        return datetime.fromisoformat(str(ts)).hour
+                    except Exception:
+                        return -1
+                h_ini = hora_inicio if hora_inicio is not None else 0
+                h_fin = hora_fin if hora_fin is not None else 23
+                filtrados = [t for t in filtrados
+                             if h_ini <= _hora_trade(t) <= h_fin]
+            if resultado is not None:
+                filtrados = [t for t in filtrados if bool(t.get('exitoso', False)) == resultado]
+
+            return filtrados
+        except Exception as e:
+            logger.error(f"Error en buscar_por_contexto: {e}")
+            return []
+
+    def estadisticas_por_patron(self, ultimos_n: int = 500) -> dict:
+        """
+        Calcula winrate y metricas agrupadas por patron de señal, activo y periodo del dia.
+        Alimenta al SignalMetaValidator con datos de fiabilidad por contexto.
+
+        Returns:
+            dict con claves 'por_patron', 'por_activo', 'por_hora'
+        """
+        try:
+            muestra = self.trades[-ultimos_n:] if len(self.trades) > ultimos_n else self.trades
+            por_patron: dict = {}
+            por_activo: dict = {}
+            por_hora: dict = {}
+
+            for t in muestra:
+                exitoso = bool(t.get('exitoso', False))
+                patron = str(t.get('motivo', 'DESCONOCIDO'))
+                activo = str(t.get('simbolo', 'UNKNOWN'))
+                try:
+                    hora = datetime.fromisoformat(str(t.get('timestamp', ''))).hour
+                except Exception:
+                    hora = -1
+                payout = float(t.get('payout', 0.82) or 0.82)
+
+                for agg, key in [(por_patron, patron), (por_activo, activo), (por_hora, hora)]:
+                    if key not in agg:
+                        agg[key] = {'total': 0, 'exitosos': 0, 'payout_sum': 0.0}
+                    agg[key]['total'] += 1
+                    agg[key]['payout_sum'] += payout
+                    if exitoso:
+                        agg[key]['exitosos'] += 1
+
+            def _calcular(agg: dict) -> dict:
+                resultado = {}
+                for k, v in agg.items():
+                    total = v['total']
+                    exitosos = v['exitosos']
+                    wr = exitosos / total if total > 0 else 0.0
+                    payout_avg = v['payout_sum'] / total if total > 0 else 0.82
+                    ev = wr * payout_avg - (1.0 - wr)
+                    resultado[k] = {
+                        'total': total,
+                        'exitosos': exitosos,
+                        'winrate': round(wr, 4),
+                        'ev': round(ev, 4),
+                        'payout_avg': round(payout_avg, 4),
+                    }
+                return resultado
+
+            return {
+                'por_patron': _calcular(por_patron),
+                'por_activo': _calcular(por_activo),
+                'por_hora': _calcular(por_hora),
+            }
+        except Exception as e:
+            logger.error(f"Error en estadisticas_por_patron: {e}")
+            return {'por_patron': {}, 'por_activo': {}, 'por_hora': {}}
+
+    def registrar_rechazo(self, par: str, direccion: str, motivo: str,
+                           confianza: float, indicadores: Optional[dict] = None) -> None:
+        """
+        Loguea señales rechazadas para analisis forense y fine-tuning posterior.
+        No guarda en self.trades (solo en log), pero persiste en archivo separado.
+        """
+        try:
+            asegurar_directorio_datos()
+            rechazo = {
+                'timestamp': datetime.now().isoformat(),
+                'par': par,
+                'direccion': direccion,
+                'motivo_rechazo': motivo,
+                'confianza': round(float(confianza or 0), 2),
+                'indicadores': indicadores or {},
+            }
+            ruta = datos_rel('rechazos_senales.json')
+            rechazos_existentes: list = []
+            if os.path.exists(ruta):
+                try:
+                    with open(ruta, 'r', encoding='utf-8') as fh:
+                        rechazos_existentes = json.load(fh)
+                    if not isinstance(rechazos_existentes, list):
+                        rechazos_existentes = []
+                except Exception:
+                    rechazos_existentes = []
+            rechazos_existentes.append(rechazo)
+            if len(rechazos_existentes) > 2000:
+                rechazos_existentes = rechazos_existentes[-2000:]
+            with open(ruta, 'w', encoding='utf-8') as fh:
+                json.dump(rechazos_existentes, fh, indent=2, default=str)
+            logger.info(f"[RECHAZO] {par} {direccion} | motivo={motivo} | conf={confianza:.1f}%")
+        except Exception as e:
+            logger.error(f"Error registrando rechazo: {e}")
+
 # ========== PREDICTOR ENSEMBLE CON CALIBRACION 85%+ ==========
 # CAPITULO 13:
 # ==================================================
@@ -7818,6 +7955,11 @@ class SeguimientoSenales:
         self.estadisticas = {"total_pares": 0,"pares_con_señal": 0,"señales_call": 0,"señales_put": 0,"ultima_operacion": None,"total_operaciones": 0,"ganadas": 0,"perdidas": 0,"beneficio_total": 0.0,"modo_actual": "BINARIO" if modo_binario else "CONTINUO"
         }
 
+        # SignalMetaValidator: validador meta con historial empirico
+        # Se conecta externamente via set_meta_validator() o directamente via self.signal_meta_validator
+        self.signal_meta_validator: Optional[Any] = None
+        self._operations_repo: Optional[Any] = None
+
         self.logger.info(
             f"✅ Sistema de seguimiento inicializado - Modo: {'BINARIO' if modo_binario else 'CONTINUO'}")
 
@@ -8063,9 +8205,53 @@ class SeguimientoSenales:
     # MÉTODOS DEL MODO BINARIO
     # ==================================================
 
+    def set_meta_validator(self, meta_validator, operations_repo=None) -> None:
+        """
+        Conecta el SignalMetaValidator al sistema de seguimiento.
+        Llamar desde BinaryBotMainWindow o el componente que inicializa todo.
+
+        Args:
+            meta_validator: Instancia de SignalMetaValidator
+            operations_repo: Instancia de OperationsRepository (opcional)
+        """
+        self.signal_meta_validator = meta_validator
+        if operations_repo:
+            self._operations_repo = operations_repo
+        self.logger.info("✅ SignalMetaValidator conectado al sistema de seguimiento")
+
     def registrar_senal_destacada(
             self, par, direccion, confianza, indicadores, precio_entrada):
         """Registra una señal destacada para modo binario"""
+
+        # ── Validacion Meta (SignalMetaValidator) ──────────────────────────────
+        if self.signal_meta_validator is not None:
+            try:
+                motivo_senal = str(indicadores.get('motivo', '') if isinstance(indicadores, dict) else '')
+                meta_result = self.signal_meta_validator.validate_signal(
+                    par=par,
+                    direccion=direccion,
+                    confianza=float(confianza or 0),
+                    indicadores=indicadores if isinstance(indicadores, dict) else {},
+                    motivo=motivo_senal,
+                )
+                if not meta_result.get('aprobado', True):
+                    self.logger.warning(
+                        f"[META_VALIDATOR] Señal {par} {direccion} RECHAZADA "
+                        f"antes de registrar: {meta_result.get('motivo_rechazo', '')}"
+                    )
+                    return None
+                ajuste = float(meta_result.get('ajuste_confianza', 0.0))
+                if ajuste != 0.0:
+                    confianza = max(0.0, float(confianza or 0) + ajuste)
+                    self.logger.info(
+                        f"[META_VALIDATOR] Confianza ajustada {par}: "
+                        f"{float(confianza - ajuste):.1f}% → {confianza:.1f}% "
+                        f"(ajuste={ajuste:+.1f})"
+                    )
+            except Exception as e:
+                self.logger.warning(f"[META_VALIDATOR] Error en validación meta: {e}")
+        # ──────────────────────────────────────────────────────────────────────
+
         with self.lock:
             # Modo binario solo permite una operación a la vez
             if self.senales_activas_binario or (self.iq_bridge.operacion_activa if hasattr(
@@ -8360,6 +8546,22 @@ class SeguimientoSenales:
         estado_final = 'WIN' if is_win else 'LOSS'
         if not is_win:
             self._ultimo_loss_ts = datetime.now().timestamp()
+
+        # ── Feedback al SignalMetaValidator (aprendizaje online) ──────────────
+        try:
+            if self.signal_meta_validator is not None:
+                indicadores_trade = senal.get('indicadores', {}) or {}
+                motivo_trade = str(indicadores_trade.get('motivo', '') or '')
+                self.signal_meta_validator.update_performance(
+                    par=par,
+                    direccion=senal.get('direccion', ''),
+                    gano=is_win,
+                    motivo=motivo_trade,
+                    indicadores=indicadores_trade,
+                )
+        except Exception as _mv_err:
+            self.logger.debug(f"[META_VALIDATOR] Error en feedback: {_mv_err}")
+        # ──────────────────────────────────────────────────────────────────────
 
         # Actualizar estadísticas
         with self.lock:
@@ -9227,6 +9429,24 @@ class IQOptionBridge:
 
         logger.info(
             "Bot inicializado con estrategia Market Maker + IA combinada")
+
+    def _sync_get_candles(self, par: str, tf_seg: int, n: int):
+        """
+        Descarga sincrónicamente N velas del par con el timeframe dado
+        (en segundos). Usado por HistoricalValidator.
+        Retorna lista de dicts con al menos {'close', 'from'}, o None si falla.
+        """
+        try:
+            if not self.api or not self.connected:
+                return None
+            ahora = time.time()
+            velas = self.api.get_candles(par, tf_seg, n, ahora)
+            if velas is None or len(velas) == 0:
+                return None
+            return velas
+        except Exception as e:
+            logger.debug(f"[BRIDGE] _sync_get_candles {par} tf={tf_seg}s n={n}: {e}")
+            return None
 
     def _actualizar_win_loss_sesion(self, exitoso: bool) -> dict:
         try:
@@ -13861,6 +14081,23 @@ class TradingManager:
         self.seguimiento_senales = SeguimientoSenales(
             config, iq_bridge, self.motor_trading)
         self.seguimiento_senales.trading_manager = self
+
+        # ── Conectar SignalMetaValidator al seguimiento ──────────────────────
+        try:
+            _ops_repo = getattr(iq_bridge, 'operations_repo', None)
+            _fusion = getattr(self, 'fusion_engine', None)
+            _meta_validator = SignalMetaValidator(
+                operations_repo=_ops_repo,
+                fusion_engine=_fusion,
+                config=config,
+            )
+            self.signal_meta_validator = _meta_validator
+            self.seguimiento_senales.set_meta_validator(_meta_validator, _ops_repo)
+        except Exception as _mv_init_err:
+            logger.warning(f"SignalMetaValidator init parcial: {_mv_init_err}")
+            self.signal_meta_validator = None
+        # ────────────────────────────────────────────────────────────────────
+
         self.operaciones_abiertas = []           # Operaciones actualmente abiertas
         # ✅ ¡NUEVO! Operaciones cerradas (historial)
         self.operaciones_cerradas = []
@@ -14925,6 +15162,245 @@ class HistoricalValidator:
         return out
 
 
+class SignalMetaValidator:
+    """
+    Validador Meta de Señales - Capa intermedia entre la fusion de señales y la ejecucion.
+
+    Flujo de integracion:
+        GeneradorSeñales → SignalFusionEngine → [SignalMetaValidator] → Ejecucion
+
+    Responsabilidades:
+      1. Consultar el historial de trades (OperationsRepository) para calcular
+         la fiabilidad empirica de la señal actual por contexto (activo, hora, patron).
+      2. Aplicar rolling window de resultados recientes para detectar rachas perdedoras
+         y penalizar/bloquear señales de baja fiabilidad.
+      3. Actualizar pesos del SignalFusionEngine dinamicamente segun tasas de acierto
+         recientes por tipo de señal.
+      4. Registrar señales rechazadas para analisis forense posterior.
+
+    Politica de fallos: FAIL-OPEN. Si no hay datos historicos suficientes, aprueba la señal
+    y deja que el resto del pipeline decida. Solo BLOQUEA con evidencia negativa clara.
+    """
+
+    MIN_MUESTRAS_CONTEXTO = 10
+    ROLLING_WINDOW = 20
+    PENALIZACION_RACHA = 0.15
+    UMBRAL_RACHA_PERDEDORA = 0.35
+    UMBRAL_WR_MINIMO_CONTEXTO = 0.45
+
+    def __init__(self, operations_repo=None, fusion_engine=None, config=None, logger=None):
+        self.repo: Optional[Any] = operations_repo
+        self.fusion: Optional[Any] = fusion_engine
+        self.config = config
+        self.logger = logger or logging.getLogger("SignalMetaValidator")
+        self._lock = threading.RLock()
+        self._cache_stats: Dict[str, dict] = {}
+        self._cache_ts: float = 0.0
+        self._cache_ttl: float = 300.0
+        self._historial_rechazos: deque = deque(maxlen=500)
+
+    def validate_signal(self, par: str, direccion: str, confianza: float,
+                        indicadores: Optional[dict] = None,
+                        motivo: str = '') -> dict:
+        """
+        Valida una señal contra el historial empirico antes de ejecutarla.
+
+        Args:
+            par: Par de divisas (ej. 'EURUSD')
+            direccion: 'CALL' o 'PUT'
+            confianza: Confianza de la señal (0-100)
+            indicadores: Dict de indicadores al momento de la señal
+            motivo: Motivo/patron de la señal del motor
+
+        Returns:
+            dict con {aprobado, score_meta, winrate_ctx, winrate_rolling,
+                      n_ctx, n_rolling, motivo_rechazo, ajuste_confianza}
+        """
+        if not getattr(self.config, 'META_VALIDATOR_HABILITADO', True):
+            return self._res(True, 1.0, 0.0, 0.0, 0, 0, '', 0.0)
+
+        if not self.repo:
+            return self._res(True, 1.0, 0.0, 0.0, 0, 0, 'SIN_REPOSITORIO', 0.0)
+
+        try:
+            hora_actual = datetime.now().hour
+            h_ini = max(0, hora_actual - 1)
+            h_fin = min(23, hora_actual + 1)
+
+            trades_ctx = self.repo.buscar_por_contexto(
+                simbolo=par,
+                hora_inicio=h_ini,
+                hora_fin=h_fin,
+                ultimos_n=500,
+            )
+            trades_rolling = self.repo.buscar_por_contexto(
+                simbolo=par,
+                ultimos_n=self.ROLLING_WINDOW,
+            )
+
+            wr_ctx, n_ctx = self._calcular_winrate(trades_ctx)
+            wr_rolling, n_rolling = self._calcular_winrate(trades_rolling)
+
+            ajuste = 0.0
+            motivo_rechazo = ''
+
+            if n_rolling >= 5 and wr_rolling < self.UMBRAL_RACHA_PERDEDORA:
+                ajuste -= self.PENALIZACION_RACHA * 100
+                motivo_rechazo = f'RACHA_PERDEDORA(wr={wr_rolling:.0%},n={n_rolling})'
+
+            if n_ctx >= self.MIN_MUESTRAS_CONTEXTO and wr_ctx < self.UMBRAL_WR_MINIMO_CONTEXTO:
+                ajuste -= 10.0
+                if not motivo_rechazo:
+                    motivo_rechazo = f'WR_CTX_BAJO({wr_ctx:.0%},n={n_ctx})'
+
+            confianza_ajustada = max(0.0, confianza + ajuste)
+
+            umbral_bloqueo = float(getattr(self.config, 'META_VALIDATOR_UMBRAL_BLOQUEO', 0.35))
+            aprobado = True
+
+            if n_ctx >= self.MIN_MUESTRAS_CONTEXTO and wr_ctx < umbral_bloqueo:
+                aprobado = False
+                motivo_rechazo = f'BLOQUEADO_WR_CTX({wr_ctx:.0%}<{umbral_bloqueo:.0%})'
+
+            if n_rolling >= 8 and wr_rolling < umbral_bloqueo:
+                aprobado = False
+                motivo_rechazo = f'BLOQUEADO_ROLLING({wr_rolling:.0%}<{umbral_bloqueo:.0%})'
+
+            score_meta = min(1.0, (
+                (wr_ctx if n_ctx >= self.MIN_MUESTRAS_CONTEXTO else 0.5) * 0.6 +
+                (wr_rolling if n_rolling >= 5 else 0.5) * 0.4
+            ))
+
+            if not aprobado:
+                self._registrar_rechazo_interno(par, direccion, motivo_rechazo, confianza, indicadores)
+
+            self.logger.info(
+                f"[META_VALIDATOR] {par} {direccion} | "
+                f"wr_ctx={wr_ctx:.0%}(n={n_ctx}) | "
+                f"wr_rolling={wr_rolling:.0%}(n={n_rolling}) | "
+                f"ajuste={ajuste:+.1f} | "
+                f"{'APROBADO' if aprobado else 'RECHAZADO: ' + motivo_rechazo}"
+            )
+
+            self._actualizar_pesos_fusion(par, direccion, wr_rolling, n_rolling)
+
+            return self._res(aprobado, score_meta, wr_ctx, wr_rolling,
+                             n_ctx, n_rolling, motivo_rechazo, ajuste)
+
+        except Exception as e:
+            self.logger.warning(f"[META_VALIDATOR] Error validando {par}: {e}")
+            return self._res(True, 1.0, 0.0, 0.0, 0, 0, f'ERROR:{e}', 0.0)
+
+    def update_performance(self, par: str, direccion: str, gano: bool,
+                           motivo: str = '', indicadores: Optional[dict] = None) -> None:
+        """
+        Registra el resultado de un trade para aprendizaje online.
+        Llamar al finalizar cada operacion con el resultado real.
+
+        Args:
+            par: Par operado
+            direccion: Direccion operada ('CALL' o 'PUT')
+            gano: True si fue ganador
+            motivo: Patron/motivo de la señal
+            indicadores: Indicadores al momento del trade
+        """
+        try:
+            if self.repo:
+                trade = {
+                    'simbolo': par,
+                    'direccion': direccion,
+                    'motivo': motivo,
+                    'indicadores': indicadores or {},
+                    'payout': float(getattr(self.config, 'PAYOUT_RATE', 0.82) if self.config else 0.82),
+                }
+                self.repo.agregar_trade(trade, gano)
+
+            if self.fusion:
+                fuentes_usadas = [
+                    {'nombre': 'IA', 'direccion': direccion},
+                    {'nombre': 'TECNICO', 'direccion': direccion},
+                ]
+                try:
+                    self.fusion.registrar_resultado(fuentes_usadas, direccion, gano)
+                except Exception:
+                    pass
+
+            self.logger.info(
+                f"[META_VALIDATOR] Performance actualizada: {par} {direccion} "
+                f"-> {'WIN' if gano else 'LOSS'}"
+            )
+        except Exception as e:
+            self.logger.error(f"[META_VALIDATOR] Error actualizando performance: {e}")
+
+    def estadisticas_contexto(self, par: str) -> dict:
+        """
+        Retorna estadisticas de contexto para un par: winrate por hora,
+        por patron y rolling reciente. Util para dashboard.
+        """
+        try:
+            if not self.repo:
+                return {}
+            stats = self.repo.estadisticas_por_patron(ultimos_n=500)
+            trades_par = self.repo.buscar_por_contexto(simbolo=par, ultimos_n=100)
+            wr_par, n_par = self._calcular_winrate(trades_par)
+            return {
+                'par': par,
+                'winrate_reciente': round(wr_par, 4),
+                'n_reciente': n_par,
+                'por_patron': stats.get('por_patron', {}),
+                'por_hora': stats.get('por_hora', {}),
+            }
+        except Exception as e:
+            self.logger.error(f"[META_VALIDATOR] Error estadisticas_contexto: {e}")
+            return {}
+
+    def _calcular_winrate(self, trades: List[dict]) -> Tuple[float, int]:
+        if not trades:
+            return 0.5, 0
+        n = len(trades)
+        exitosos = sum(1 for t in trades if bool(t.get('exitoso', False)))
+        return exitosos / n, n
+
+    def _actualizar_pesos_fusion(self, par: str, direccion: str,
+                                  wr_rolling: float, n_rolling: int) -> None:
+        """Ajusta los pesos del SignalFusionEngine segun rendimiento reciente."""
+        try:
+            if not self.fusion or n_rolling < 5:
+                return
+            fuentes = [{'nombre': 'IA', 'direccion': direccion}]
+            outcome = wr_rolling >= 0.5
+            self.fusion.registrar_resultado(fuentes, direccion, outcome)
+        except Exception:
+            pass
+
+    def _registrar_rechazo_interno(self, par: str, direccion: str,
+                                    motivo: str, confianza: float,
+                                    indicadores: Optional[dict]) -> None:
+        try:
+            reg = {
+                'timestamp': datetime.now().isoformat(),
+                'par': par, 'direccion': direccion,
+                'motivo': motivo, 'confianza': confianza,
+            }
+            self._historial_rechazos.append(reg)
+            if self.repo and hasattr(self.repo, 'registrar_rechazo'):
+                self.repo.registrar_rechazo(par, direccion, motivo, confianza, indicadores)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _res(aprobado, score_meta, wr_ctx, wr_rolling, n_ctx, n_rolling,
+             motivo_rechazo, ajuste_confianza) -> dict:
+        return {
+            'aprobado': bool(aprobado),
+            'score_meta': float(score_meta),
+            'winrate_ctx': float(wr_ctx),
+            'winrate_rolling': float(wr_rolling),
+            'n_ctx': int(n_ctx),
+            'n_rolling': int(n_rolling),
+            'motivo_rechazo': str(motivo_rechazo),
+            'ajuste_confianza': float(ajuste_confianza),
+        }
 
 
 class RiskEngine:
@@ -20769,7 +21245,10 @@ if GUI_AVAILABLE:
                                 import random
                                 is_win = random.choice([True, True, False])
 
-                            self.ai_engine.learn_from_result(is_win)
+                            _dir_aprendizaje = getattr(
+                                self, '_ultima_direccion_trade', None)
+                            self.ai_engine.learn_from_result(
+                                is_win, direction=_dir_aprendizaje)
                             self.trading_activos -= 1
 
                     time.sleep(1)
